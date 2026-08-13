@@ -172,6 +172,21 @@
     margin-bottom: 20px;
   }
   .note strong { color: var(--text-primary); }
+  .ai-progress-text { margin-bottom: 8px; }
+  .ai-progress-bar {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--gridline);
+    overflow: hidden;
+  }
+  .ai-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--brand-orange);
+    width: 0%;
+    transition: width 0.6s ease;
+  }
+  .ai-progress-elapsed { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
   .filters { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
   .filters select, .filters input {
     font: inherit;
@@ -452,7 +467,7 @@
 
 <nav class="tabs">
   <button id="tab-dashboard-btn" class="active">Dashboard</button>
-  <button id="tab-grading-btn">Grade a Session</button>
+  <button id="tab-grading-btn">Training</button>
 </nav>
 
 <main>
@@ -488,7 +503,7 @@
 
     <!-- GRADING TAB -->
     <section id="tab-grading" class="hidden">
-      <span class="pill">Training Tracker | Grade a Session</span>
+      <span class="pill">Training Tracker | Training</span>
       <div class="panel">
         <form class="grading-form" id="grading-form">
           <div class="field">
@@ -496,13 +511,6 @@
             <select id="g-trainee" required>
               <option value="">Select a person…</option>
             </select>
-          </div>
-          <div class="field">
-            <label>Session type</label>
-            <div class="radio-row">
-              <label><input type="radio" name="session-type" value="Training Day" checked> Training Day</label>
-              <label><input type="radio" name="session-type" value="Team On-Site Day"> Team On-Site Day</label>
-            </div>
           </div>
           <div class="field">
             <label for="g-grader">Grader (your name)</label>
@@ -558,6 +566,14 @@ const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googlea
 // AI grading: the Web App URL from deploying Code.gs in Apps Script (Deploy > New deployment > Web app).
 const AI_GRADING_ENDPOINT = 'https://script.google.com/a/macros/decorepair.com/s/AKfycbyWTE5fjMMSr2pExK0EuyuExZhXT0Por7k2Hh6vXeSrXRbAlDT7qrOsErKz6W_SnY3I/exec';
 /* ============================================================================ */
+
+// This tab ("Training") now only grades Training Day sessions — the earlier
+// in-tab Training Day / Team On-Site Day toggle was removed 2026-08-13 so
+// the app can grow into separate tabs per session type instead (a future
+// "Team On-Site Day" tab would set its own fixed type the same way). If a
+// second grading tab is added later, this becomes that tab's own constant
+// rather than a single shared toggle.
+const CURRENT_SESSION_TYPE = 'Training Day';
 
 let accessToken = null;
 let tokenClient = null;
@@ -893,30 +909,13 @@ function populateTraineeDropdown() {
   });
 })();
 
-// Manual grade is entered on the same 0-max scale as the rubric itself
-// (Training Day maxes out at 110, Team On-Site Day at 50 — see
-// SESSION_MAX_POSSIBLE below), so the field's max/label track whichever
-// session type is currently selected instead of staying fixed at 110.
-(function () {
-  const gradeInput = document.getElementById('g-grade');
-  const maxLabel = document.getElementById('g-grade-max-label');
-  document.querySelectorAll('input[name="session-type"]').forEach(radio => {
-    radio.addEventListener('change', () => {
-      const max = SESSION_MAX_POSSIBLE[radio.value] || 110;
-      gradeInput.max = max;
-      maxLabel.textContent = max;
-      if (gradeInput.value !== '' && Number(gradeInput.value) > max) gradeInput.value = max;
-    });
-  });
-})();
-
 document.getElementById('grading-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const statusEl = document.getElementById('grade-status');
   const btn = document.getElementById('grade-submit-btn');
   const audioFile = document.getElementById('g-audio').files[0];
   if (!audioFile) { statusEl.textContent = 'Please choose an audio file.'; statusEl.className = 'err'; return; }
-  const sessionTypeForValidation = document.querySelector('input[name="session-type"]:checked').value;
+  const sessionTypeForValidation = CURRENT_SESSION_TYPE;
   const gradeMaxForValidation = SESSION_MAX_POSSIBLE[sessionTypeForValidation] || 110;
   const rawGradeVal = document.getElementById('g-grade').value.trim();
   if (rawGradeVal !== '') {
@@ -942,7 +941,7 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     const fileInfo = await driveGetFile(fileMeta.id, 'webViewLink');
 
     statusEl.textContent = 'Saving grade…';
-    const sessionType = document.querySelector('input[name="session-type"]:checked').value;
+    const sessionType = CURRENT_SESSION_TYPE;
     const traineeName = document.getElementById('g-trainee').value;
     const graderName = document.getElementById('g-grader').value;
     const gradeMax = SESSION_MAX_POSSIBLE[sessionType] || 110;
@@ -1016,11 +1015,62 @@ async function driveGetFile(fileId, fields) {
 }
 
 /* ---------------------- AI grading ---------------------- */
+// The Apps Script endpoint is one blocking HTTP call that only returns once
+// all 3 consensus-grading Gemini passes finish server-side — there's no
+// real progress feed to poll, so a literal "live %" isn't available without
+// a bigger backend change (e.g. Code.gs writing progress to the sheet as it
+// goes, and this page polling that). What's implemented instead is an
+// honest *estimated* progress bar: it fills toward ~92% over a typical
+// grading duration, then creeps slowly the rest of the way if a session
+// runs long, and only snaps to 100% once the real result actually comes
+// back — paired with a running elapsed-time readout so Jordan can see it's
+// still working, not stuck. ESTIMATED_GRADING_SECONDS (3 minutes) reflects
+// that Code.gs runs 3 sequential Gemini calls per session — adjust this if
+// real observed timings turn out to run consistently faster or slower.
+const ESTIMATED_GRADING_SECONDS = 180;
+
+function formatElapsed(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function estimatedProgressPercent(elapsedSeconds) {
+  if (elapsedSeconds <= ESTIMATED_GRADING_SECONDS) {
+    return (elapsedSeconds / ESTIMATED_GRADING_SECONDS) * 92;
+  }
+  // Past the estimate: creep slowly from 92% toward 97% over the next
+  // ~2.5 minutes, then hold — never claims 100% until the real result lands.
+  const overrun = elapsedSeconds - ESTIMATED_GRADING_SECONDS;
+  return Math.min(97, 92 + (overrun / 150) * 5);
+}
+
 async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerName, graderName, date, audioFileId }) {
   const statusEl = document.getElementById('aiGradingStatus');
+  let progressTimer = null;
+  const startedAt = Date.now();
+
+  function renderProgress() {
+    if (!statusEl) return;
+    const elapsed = (Date.now() - startedAt) / 1000;
+    const pct = estimatedProgressPercent(elapsed);
+    const label = elapsed <= ESTIMATED_GRADING_SECONDS
+      ? `AI grading in progress — usually takes about ${formatElapsed(ESTIMATED_GRADING_SECONDS)} for a full session (this is an estimate, not a live server progress feed).`
+      : `Still grading — this one's taking longer than the usual ${formatElapsed(ESTIMATED_GRADING_SECONDS)}. Hang tight.`;
+    statusEl.innerHTML =
+      `<div class="ai-progress-text">${escapeHtml(label)}</div>` +
+      `<div class="ai-progress-bar"><div class="ai-progress-fill" style="width:${pct.toFixed(1)}%"></div></div>` +
+      `<div class="ai-progress-elapsed">Elapsed: ${formatElapsed(elapsed)}</div>`;
+  }
+
+  function stopProgress() {
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+  }
+
   if (statusEl) {
     statusEl.classList.remove('hidden');
-    statusEl.textContent = 'AI grading in progress… this can take a minute or two for longer audio.';
+    renderProgress();
+    progressTimer = setInterval(renderProgress, 1000);
   }
 
   try {
@@ -1037,18 +1087,26 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
       })
     });
     const result = await response.json();
+    stopProgress();
 
     if (!result.ok) {
-      if (statusEl) statusEl.textContent = 'AI grading failed: ' + result.error;
+      if (statusEl) statusEl.innerHTML = escapeHtml('AI grading failed: ' + result.error);
       console.error('AI grading error:', result.error);
       return null;
     }
 
-    if (statusEl) statusEl.textContent = 'AI grading complete — see result below.';
+    if (statusEl) {
+      const totalElapsed = (Date.now() - startedAt) / 1000;
+      statusEl.innerHTML =
+        `<div class="ai-progress-text">AI grading complete — see result below.</div>` +
+        `<div class="ai-progress-bar"><div class="ai-progress-fill" style="width:100%"></div></div>` +
+        `<div class="ai-progress-elapsed">Took ${formatElapsed(totalElapsed)}.</div>`;
+    }
     renderAiGradingResult(result);
     return result;
   } catch (err) {
-    if (statusEl) statusEl.textContent = 'AI grading request failed: ' + err.message;
+    stopProgress();
+    if (statusEl) statusEl.innerHTML = escapeHtml('AI grading request failed: ' + err.message);
     console.error(err);
     return null;
   }
