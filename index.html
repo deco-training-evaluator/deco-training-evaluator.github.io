@@ -260,6 +260,10 @@
     color: var(--text-primary);
   }
   .field textarea { min-height: 110px; resize: vertical; }
+  /* Manual grade is a number input but reads more like a plain score field
+     than a stepper, so the browser's up/down spinner arrows are hidden. */
+  #g-grade::-webkit-outer-spin-button, #g-grade::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  #g-grade[type=number] { -moz-appearance: textfield; }
   .radio-row { display: flex; gap: 16px; }
   .radio-row label { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; }
   .check-row {
@@ -659,15 +663,28 @@ function onGsiLoad() {
   btn.textContent = 'Sign in with Google';
 
   // Restore a still-valid cached session on load (fixes "signed out on
-  // every refresh"); otherwise make one best-effort silent attempt in case
-  // the browser still has an active Google session from a previous visit.
+  // every refresh"); otherwise make a silent attempt in case the browser
+  // still has an active Google session from a previous visit — this is what
+  // lets someone stay signed in across a closed tab/browser without
+  // reclicking "Sign in," for as long as their browser's own Google login
+  // stays active (Google doesn't offer a longer-lived option to a
+  // client-only page like this one — a truly permanent session would need a
+  // backend holding a refresh token). One retry after a short delay covers
+  // the case where this first attempt fires before Google's script has
+  // fully finished initializing, which otherwise looks identical to "no
+  // active session" but isn't.
   const stored = loadStoredToken();
   if (stored) {
     accessToken = stored.access_token;
     scheduleTokenRefresh((stored.expires_at - Date.now()) / 1000);
     onSignedIn();
   } else {
-    requestSilentToken().then((token) => { if (token) onSignedIn(); });
+    requestSilentToken().then((token) => {
+      if (token) { onSignedIn(); return; }
+      setTimeout(() => {
+        requestSilentToken().then((retryToken) => { if (retryToken) onSignedIn(); });
+      }, 1500);
+    });
   }
 }
 
@@ -797,10 +814,10 @@ function renderDashboardTable() {
   // Short header labels keep all 9 columns fitting in one view (no horizontal
   // scroll); the full column name is still available on hover via title=.
   const shortLabels = {
-    'Day 1 - Meeting Attended': 'D1 Attended',
-    'Day 1 - Training Watched': 'D1 Watched',
+    'Day 1 - Meeting Attended': 'Meeting',
+    'Day 1 - Training Watched': 'D1 Training',
     'Day 2 - Ops/District Manager Training': 'D2 Training',
-    'Team On-Site Day Completed': 'TOSD Done',
+    'Team On-Site Day Completed': 'TOSD',
     'Certified - Team On-Site Days': 'TOSD Cert',
     'Certified - Training Days': 'Training Cert'
   };
@@ -1099,7 +1116,7 @@ function renderAiGradingResult(result, container) {
     <div class="ai-summary-row">
       <div class="ai-stat">
         <span class="ai-stat-label">Total score</span>
-        <span class="ai-stat-value">${escapeHtml(String(result.total_score ?? 'N/A'))}${maxPossible ? ' / ' + maxPossible : ''}</span>
+        <span class="ai-stat-value">${escapeHtml(String((result.total_score !== undefined && result.total_score !== null && !Number.isNaN(Number(result.total_score))) ? result.total_score : 0))}${maxPossible ? ' / ' + maxPossible : ''}</span>
       </div>
       <div class="ai-stat">
         <span class="ai-stat-label">Certified</span>
@@ -1201,15 +1218,29 @@ function parseAiResultFromRow(r) {
   };
 }
 
-// Compact "12/110 · Certified" style summary for the AI Grade column.
-function aiGradeSummaryCell(aiRow) {
+// Plain "12/110" score for the AI Grade column — a missing/non-numeric
+// total (N/A) shows as 0 rather than the text "N/A", so the column always
+// reads as a comparable number.
+function aiScoreCell(aiRow) {
   const total = aiRow[8];
   const max = aiRow[9];
+  const totalNum = (total !== '' && total != null && !Number.isNaN(Number(total))) ? Number(total) : 0;
+  const scoreText = escapeHtml(String(totalNum)) + (max ? '/' + escapeHtml(String(max)) : '');
+  return `<span class="ai-grade-cell">${scoreText}</span>`;
+}
+
+// Dedicated Certified column — always a clean Yes/No badge, even for legacy
+// rows whose raw "certified" text is something else (e.g. an old test row's
+// long "Cannot determine..." note from before Code.gs guaranteed Yes/No).
+// The raw value is kept as a title= tooltip so nothing is hidden, just not
+// left ambiguous in the column itself.
+function aiCertifiedCell(aiRow) {
   const certified = aiRow[10];
-  const scoreText = (total !== '' && total != null)
-    ? escapeHtml(String(total)) + (max ? '/' + escapeHtml(String(max)) : '')
-    : 'N/A';
-  return `<span class="ai-grade-cell">${scoreText} · ${certifiedBadge(certified)}</span>`;
+  const isYes = (certified || '').trim().toLowerCase() === 'yes';
+  const raw = certified || 'blank';
+  return isYes
+    ? `<span class="badge good" title="${escapeHtml(raw)}">${checkIcon()}Yes</span>`
+    : `<span class="badge critical" title="${escapeHtml(raw)}">${xIcon()}No</span>`;
 }
 
 async function loadRecentLog() {
@@ -1272,7 +1303,7 @@ async function loadRecentLog() {
     // Pre-parse each merged submission's AI result (from its AI row's column S) so we know which are expandable.
     const parsedAi = body.map(s => s.aiRow ? parseAiResultFromRow(s.aiRow) : null);
 
-    let html = '<table class="log-table"><thead><tr><th></th><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Manual Grade</th><th>AI Grade</th><th>Audio</th><th></th></tr></thead><tbody>';
+    let html = '<table class="log-table"><thead><tr><th></th><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Manual Grade</th><th>AI Grade</th><th>Certified</th><th>Audio</th><th></th></tr></thead><tbody>';
     body.forEach((s, i) => {
       const when = s.when ? new Date(s.when).toLocaleString() : '';
       const audioCell = s.audioLink ? `<a href="${escapeHtml(s.audioLink)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Listen</a>` : '';
@@ -1282,8 +1313,11 @@ async function loadRecentLog() {
         ? escapeHtml(s.manualGrade)
         : `<span class="grade-cell-muted">${s.grader === 'Did not attend' ? '—' : 'None'}</span>`;
       const aiGradeCell = hasAi
-        ? aiGradeSummaryCell(s.aiRow)
+        ? aiScoreCell(s.aiRow)
         : `<span class="grade-cell-muted">${s.audioLink ? 'Pending…' : 'N/A'}</span>`;
+      const certifiedCell = hasAi
+        ? aiCertifiedCell(s.aiRow)
+        : `<span class="grade-cell-muted">—</span>`;
       const rowsAttr = s.rowNumbers.join(',');
       const deleteCell = `<td class="log-delete-cell">` +
         `<button type="button" class="log-delete-btn" data-row-index="${i}" data-sheet-rows="${rowsAttr}" title="Delete this submission">${trashIcon()}<span class="log-delete-label">Delete</span></button>` +
@@ -1291,9 +1325,9 @@ async function loadRecentLog() {
       html += `<tr class="log-row${hasAi ? ' has-ai' : ''}" data-row-index="${i}">` +
         `<td class="log-chevron-cell">${chevron}</td>` +
         `<td>${escapeHtml(when)}</td><td>${escapeHtml(s.trainee)}</td><td>${escapeHtml(s.type)}</td>` +
-        `<td>${escapeHtml(s.grader)}</td><td>${manualGradeCell}</td><td>${aiGradeCell}</td><td>${audioCell}</td>${deleteCell}</tr>`;
+        `<td>${escapeHtml(s.grader)}</td><td>${manualGradeCell}</td><td>${aiGradeCell}</td><td>${certifiedCell}</td><td>${audioCell}</td>${deleteCell}</tr>`;
       if (hasAi) {
-        html += `<tr class="log-detail-row hidden" data-row-index="${i}"><td colspan="9"><div class="ai-result-box" id="log-detail-${i}"></div></td></tr>`;
+        html += `<tr class="log-detail-row hidden" data-row-index="${i}"><td colspan="10"><div class="ai-result-box" id="log-detail-${i}"></div></td></tr>`;
       }
     });
     html += '</tbody></table>';
