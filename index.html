@@ -188,6 +188,11 @@
     border-color: var(--accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
   }
+  #dashboard-table-wrap, #recent-log-wrap {
+    overflow-x: auto;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td {
     text-align: left;
