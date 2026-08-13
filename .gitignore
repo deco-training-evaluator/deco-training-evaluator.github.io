@@ -1,0 +1,8 @@
+# This repo is public — it serves the live GitHub Pages site.
+# These two folders are kept local-only on purpose: they hold the full Gemini
+# grading prompt, the DECO rubrics, and BC pricing/discount ladders, which
+# shouldn't be readable by anyone who finds the repo.
+# If DECO ever wants version history for them, move them to a PRIVATE repo
+# rather than deleting these lines.
+apps-script/
+docs/
