@@ -401,8 +401,8 @@
     white-space: normal;
     display: grid;
     /* Wide enough to hold the "Double-check" badge without it spilling into
-       the Talked about column. */
-    grid-template-columns: 134px repeat(3, minmax(0, 1fr));
+       the Talked about column, plus two timestamp chips side by side. */
+    grid-template-columns: 158px repeat(3, minmax(0, 1fr));
   }
   /* The score gets its own column so the scores read straight down the left
      edge instead of being hunted for on each row. */
@@ -446,6 +446,80 @@
     color: var(--text-muted);
   }
   .ai-detail-text.is-empty { color: var(--text-muted); }
+  /* ---- Evidence timestamps + in-page player ----
+     The card used to flag a section as doubtful without saying WHERE in the
+     recording to check it, so verifying a flag cost a re-listen of the whole
+     session and the flags went unchecked. These are the AI's own jump points:
+     the moments it says drove each score. Deliberately understated — they're
+     an aid to a human's judgement, not evidence in their own right. */
+  .ai-audio {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    margin: 0 0 18px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--brand-orange);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--brand-cream) 30%, var(--surface-1));
+  }
+  .ai-audio-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  /* A little louder than a stock secondary button: on the cream strip the
+     default border all but disappears and it reads as bold text, not a control. */
+  .ai-audio-load {
+    font-size: 13px;
+    padding: 6px 12px;
+    white-space: nowrap;
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    color: var(--accent);
+  }
+  .ai-audio-load:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .ai-audio-hint, .ai-audio-status {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    overflow-wrap: break-word;
+    min-width: 0;
+  }
+  .ai-audio-status:empty { display: none; }
+  .ai-audio-status.is-err { color: var(--critical); }
+  .ai-audio-slot:empty { display: none; }
+  .ai-audio-player { width: 100%; display: block; }
+  .ai-audio-quote { font-style: italic; color: var(--text-primary); }
+  .ai-clips { display: flex; flex-direction: column; gap: 5px; margin-top: 9px; }
+  .ai-clip-row { display: flex; flex-wrap: wrap; gap: 4px; }
+  .clip-chip {
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--accent);
+    cursor: pointer;
+  }
+  .clip-chip:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .clip-chip.is-active {
+    background: var(--brand-orange);
+    border-color: var(--brand-orange);
+    color: var(--brand-black);
+  }
+  /* No player available (not signed in, or a row with no audio file) — the
+     times still tell you where to scrub to in Drive, so they're shown, just
+     not dressed up as buttons. */
+  .clip-chip.is-static { cursor: default; border-style: dashed; }
+  .clip-chip.is-static:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  /* The three consensus passes' individual scores. "Double-check" on its own
+     can't distinguish 8·8·5 (one outlier) from 9·6·3 (no real signal), and
+     those deserve very different amounts of a manager's attention. */
+  .ai-run-scores {
+    margin-top: 7px;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+  }
   @container (max-width: 640px) {
     .ai-section-detail { grid-template-columns: 1fr; }
     .ai-detail-col { padding: 0; border-left: none; }
@@ -492,8 +566,33 @@
   .ai-callout.strong .ai-callout-label { color: var(--good); }
   .ai-callout.weak .ai-callout-label { color: var(--critical); }
   .ai-callout.focus .ai-callout-label { color: var(--warning); }
-  .ai-callout-item { margin: 2px 0; }
+  /* Each entry reads "Short label: what to do", and the label is bolded so the
+     three columns can be skimmed by label alone. */
+  .ai-callout-item { margin: 0 0 7px; }
+  .ai-callout-item:last-child { margin-bottom: 0; }
+  .ai-callout-item strong { color: var(--text-primary); }
   .ai-note { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin: 6px 0 0; }
+  /* Reviewer notes arrive as one long run-on line (Gemini's note plus the
+     machine-appended flags, joined with " | "). Rendered as separate bullets
+     so each thing to check is its own item instead of a paragraph. */
+  .ai-note-block { margin: 10px 0 0; }
+  .ai-note-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+    margin-bottom: 5px;
+  }
+  .ai-note-list {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+  }
+  .ai-note-list li { margin: 0 0 3px; }
   .log-table td.log-chevron-cell { width: 22px; padding-right: 0; }
   .log-chevron {
     display: inline-block;
@@ -1186,7 +1285,7 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
         `<div class="ai-progress-bar"><div class="ai-progress-fill" style="width:100%"></div></div>` +
         `<div class="ai-progress-elapsed">Took ${formatElapsed(totalElapsed)}.</div>`;
     }
-    renderAiGradingResult(result);
+    renderAiGradingResult(result, undefined, audioFileId);
     return result;
   } catch (err) {
     stopProgress();
@@ -1200,6 +1299,256 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
 // response itself doesn't include max_possible, so it's re-derived here from
 // session_type to show "score / max" in the summary row.
 const SESSION_MAX_POSSIBLE = { 'Team On-Site Day': 50, 'Training Day': 110 };
+
+/* ---------------------- Evidence timestamps ----------------------
+   Every section can carry evidence_clips — the moments the AI says drove its
+   score — so a flagged section can be checked in about a minute instead of by
+   re-listening to the whole session.
+
+   IMPORTANT: parseClipSeconds / formatClipTime / mergeClips below are a
+   deliberate copy of the same three functions in Code.gs. A freshly graded
+   session gets its merged clips from the backend; a session re-opened later
+   from Recent Submissions gets them rebuilt HERE from the per-run raw JSON in
+   column S, because the sheet never stores one reconciled object. If the merge
+   rules change in one place and not the other, the same session will show
+   different jump points depending on how it was opened. Change both. */
+const CLIP_MERGE_WINDOW_SECONDS = 20;
+const MAX_CLIPS_PER_SECTION = 3;
+// Gemini's audio timestamps land near the right moment, not on it. Starting
+// playback slightly early is recoverable — you hear a little run-up; starting
+// late means missing the exchange entirely and not knowing you missed it.
+const CLIP_PREROLL_SECONDS = 10;
+
+// "14:22" -> 862, "1:02:33" -> 3753. null for anything that isn't a real
+// timestamp, so a malformed clip is dropped rather than rendered as a jump
+// point that would land somewhere arbitrary.
+function parseClipSeconds(text) {
+  if (!text) return null;
+  const match = String(text).trim().match(/^(?:(\d{1,2}):)?(\d{1,3}):(\d{2})$/);
+  if (!match) return null;
+  const hours = match[1] ? parseInt(match[1], 10) : 0;
+  const minutes = parseInt(match[2], 10);
+  const seconds = parseInt(match[3], 10);
+  if (seconds > 59) return null;
+  return (hours * 3600) + (minutes * 60) + seconds;
+}
+
+function formatClipTime(totalSeconds) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  const mm = (hours > 0 && minutes < 10) ? '0' + minutes : String(minutes);
+  const ss = seconds < 10 ? '0' + seconds : String(seconds);
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+// Merges every run's clips for one section down to at most
+// MAX_CLIPS_PER_SECTION jump points. Two runs pointing at the same exchange
+// won't cite the same number, so anything within CLIP_MERGE_WINDOW_SECONDS is
+// treated as one moment rather than three near-duplicate chips.
+function mergeClips(entries) {
+  const all = [];
+  entries.forEach((entry, runIndex) => {
+    // Array.isArray, not a truthiness check — a run whose evidence_clips came
+    // back in an unexpected shape should cost that section its timestamps, not
+    // throw and blank the whole result card.
+    const clips = (entry && Array.isArray(entry.evidence_clips)) ? entry.evidence_clips : [];
+    clips.forEach(clip => {
+      const seconds = parseClipSeconds(clip && clip.at);
+      if (seconds === null) return;
+      all.push({ seconds, quote: String((clip && clip.quote) || '').trim(), run: runIndex });
+    });
+  });
+  if (!all.length) return [];
+
+  all.sort((a, b) => a.seconds - b.seconds);
+
+  const groups = [];
+  all.forEach(clip => {
+    const current = groups[groups.length - 1];
+    // The group keeps its EARLIEST time as the jump point — same reasoning as
+    // the pre-roll above.
+    if (current && (clip.seconds - current.seconds) <= CLIP_MERGE_WINDOW_SECONDS) {
+      current.quotes.push(clip.quote);
+      if (!current.runs.includes(clip.run)) current.runs.push(clip.run);
+      return;
+    }
+    groups.push({ seconds: clip.seconds, quotes: [clip.quote], runs: [clip.run] });
+  });
+
+  const merged = groups.map(group => ({
+    at: formatClipTime(group.seconds),
+    seconds: group.seconds,
+    // Longest quote wins — it's the one that best tells a listener they landed
+    // in the right place.
+    quote: group.quotes.filter(Boolean).sort((a, b) => b.length - a.length)[0] || '',
+    runs: group.runs.length
+  }));
+
+  if (merged.length <= MAX_CLIPS_PER_SECTION) return merged;
+  // Over the cap: keep the moments the most runs independently pointed at,
+  // then put them back in time order so they're listened to in order.
+  return merged
+    .slice()
+    .sort((a, b) => b.runs - a.runs)
+    .slice(0, MAX_CLIPS_PER_SECTION)
+    .sort((a, b) => a.seconds - b.seconds);
+}
+
+// A Drive webViewLink ("https://drive.google.com/file/d/<id>/view?...") back to
+// the bare file ID, so a logged row can feed the same player a fresh result uses.
+function driveFileIdFromLink(link) {
+  const match = String(link || '').match(/\/d\/([A-Za-z0-9_-]{10,})/);
+  return match ? match[1] : null;
+}
+
+function clipChips(clips, interactive) {
+  if (!clips || !clips.length) return '';
+  const chips = clips.map(clip => {
+    const quote = clip.quote ? ` — “${clip.quote}”` : '';
+    const tip = `Jump to about ${clip.at}${quote}`;
+    return interactive
+      ? `<button type="button" class="clip-chip" data-seconds="${escapeHtml(String(clip.seconds))}" data-at="${escapeHtml(clip.at)}" data-quote="${escapeHtml(clip.quote || '')}" title="${escapeHtml(tip)}">${escapeHtml(clip.at)}</button>`
+      : `<span class="clip-chip is-static" title="${escapeHtml(tip)}">${escapeHtml(clip.at)}</span>`;
+  }).join('');
+  return `<div class="ai-clips">
+    <span class="ai-detail-label">Listen at</span>
+    <div class="ai-clip-row">${chips}</div>
+  </div>`;
+}
+
+// The three passes' individual scores, shown only where the reconciled score
+// is already flagged as shaky. A missing entry means that pass said there was
+// nothing to score, which is itself part of the disagreement — show it as "—"
+// rather than dropping it and making the passes look more aligned than they were.
+function runScoresLine(runScores) {
+  if (!Array.isArray(runScores) || runScores.length < 2) return '';
+  const shown = runScores.map(s => (typeof s === 'number' ? String(s) : '—'));
+  return `<div class="ai-run-scores" title="What each of the 3 AI passes scored this section before they were reconciled.">3 passes: ${escapeHtml(shown.join(' · '))}</div>`;
+}
+
+/* Loads the session audio from Drive on demand and seeks to a cited moment.
+   Not loaded up front: a full training session can be tens of megabytes, and
+   most results are read without anyone needing to check a timestamp. */
+function wireEvidencePlayer(container, fileId) {
+  // The Grade a Session tab renders into the SAME container every time a
+  // session is graded. Its old click handler survives the innerHTML swap that
+  // just wiped the elements, so without this a second grading would leave two
+  // live handlers (two players appended, audio loaded twice) and strand the
+  // first recording's blob in memory.
+  if (container._evidenceCleanup) {
+    container._evidenceCleanup();
+    container._evidenceCleanup = null;
+  }
+
+  const shell = container.querySelector('.ai-audio');
+  if (!shell || !fileId) return;
+  const slot = shell.querySelector('.ai-audio-slot');
+  const statusEl = shell.querySelector('.ai-audio-status');
+  const hintEl = shell.querySelector('.ai-audio-hint');
+  const loadBtn = shell.querySelector('.ai-audio-load');
+  let audioEl = null;
+  let loadPromise = null;
+  let objectUrl = null;
+
+  const setStatus = (html, isError) => {
+    statusEl.innerHTML = html;
+    statusEl.classList.toggle('is-err', !!isError);
+  };
+
+  async function ensureLoaded() {
+    if (audioEl) return audioEl;
+    if (loadPromise) return loadPromise;
+    loadPromise = (async () => {
+      loadBtn.hidden = true;
+      if (hintEl) hintEl.hidden = true;
+      setStatus('Loading the recording from Drive…');
+      if (!(await ensureFreshToken())) throw new Error('You need to be signed in to load the recording.');
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { Authorization: 'Bearer ' + accessToken }
+      });
+      if (!res.ok) throw new Error(`Drive returned ${res.status} when fetching the audio.`);
+
+      // Streamed so a big file shows real progress instead of sitting silent.
+      // Falls back to a plain blob read where streaming isn't available.
+      const total = Number(res.headers.get('content-length')) || 0;
+      let blob;
+      if (res.body && res.body.getReader && total > 0) {
+        const reader = res.body.getReader();
+        const chunks = [];
+        let received = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          setStatus(`Loading the recording… ${Math.round((received / total) * 100)}%`);
+        }
+        blob = new Blob(chunks, { type: res.headers.get('content-type') || 'audio/mpeg' });
+      } else {
+        blob = await res.blob();
+      }
+
+      const el = document.createElement('audio');
+      el.controls = true;
+      el.preload = 'metadata';
+      el.className = 'ai-audio-player';
+      objectUrl = URL.createObjectURL(blob);
+      el.src = objectUrl;
+      slot.appendChild(el);
+      audioEl = el;
+      setStatus('Click any timestamp below to jump there.');
+      return el;
+    })();
+    try {
+      return await loadPromise;
+    } catch (err) {
+      loadPromise = null;
+      loadBtn.hidden = false;
+      setStatus(escapeHtml(err.message || 'Could not load the recording.'), true);
+      throw err;
+    }
+  }
+
+  function seek(el, seconds, at, quote) {
+    const apply = () => {
+      // A cited time past the end of the recording means the AI got the
+      // timestamp wrong — say so rather than quietly dumping the manager at
+      // the last second of the file and letting them think they heard it.
+      if (Number.isFinite(el.duration) && seconds > el.duration) {
+        setStatus(`The AI cited ${escapeHtml(at)}, but this recording is only ${escapeHtml(formatClipTime(el.duration))} long — treat that timestamp as wrong.`, true);
+        return;
+      }
+      el.currentTime = Math.max(0, seconds - CLIP_PREROLL_SECONDS);
+      el.play().catch(() => { /* autoplay blocked — the player is still cued up */ });
+      const quoteLine = quote ? ` — listen for <span class="ai-audio-quote">“${escapeHtml(quote)}”</span>` : '';
+      setStatus(`Playing from about ${escapeHtml(at)}${quoteLine}. Started ${CLIP_PREROLL_SECONDS}s early on purpose — the AI's timestamps are close, not exact.`);
+    };
+    if (el.readyState >= 1) apply();
+    else el.addEventListener('loadedmetadata', apply, { once: true });
+  }
+
+  loadBtn.addEventListener('click', () => { ensureLoaded().catch(() => {}); });
+
+  const onChipClick = async (event) => {
+    const chip = event.target.closest('.clip-chip');
+    if (!chip || chip.classList.contains('is-static') || !container.contains(chip)) return;
+    event.stopPropagation(); // inside Recent Submissions this sits in a click-to-expand row
+    container.querySelectorAll('.clip-chip.is-active').forEach(el => el.classList.remove('is-active'));
+    chip.classList.add('is-active');
+    try {
+      const el = await ensureLoaded();
+      seek(el, Number(chip.dataset.seconds), chip.dataset.at, chip.dataset.quote);
+    } catch (err) { /* the status line already explains what went wrong */ }
+  };
+  container.addEventListener('click', onChipClick);
+
+  container._evidenceCleanup = () => {
+    container.removeEventListener('click', onChipClick);
+    if (audioEl) audioEl.pause();
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  };
+}
 
 // A section with no confident score is shown as 0/10 with a footnote mark, not
 // as "insufficient evidence". That's what it actually counts as: Code.gs counts
@@ -1236,7 +1585,11 @@ function detailColumn(label, text) {
   </div>`;
 }
 
-function renderAiGradingResult(result, container) {
+// audioFileId is the Drive ID of the session recording, when it's known — it
+// turns each section's cited timestamps into clickable jump points. Optional
+// on purpose: results graded before evidence timestamps existed, and rows with
+// no usable audio link, still render exactly as they did before.
+function renderAiGradingResult(result, container, audioFileId) {
   container = container || document.getElementById('aiGradingResult');
   if (!container) return;
 
@@ -1246,6 +1599,7 @@ function renderAiGradingResult(result, container) {
   let anyNoEvidence = false;
   let anyInconsistent = false;
   let anyNeedsReview = false;
+  let anyClips = false;
   const sectionItems = Object.entries(result.sections || {}).map(([key, val]) => {
     const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     if (val.evidence_basis === 'inconsistent_across_runs') {
@@ -1264,6 +1618,12 @@ function renderAiGradingResult(result, container) {
     const covered = val.covered || val.evidence || '';
     const missed = val.missed || '';
     const justification = val.justification || '';
+    // Timestamps sit in the score column rather than a fifth column: they're
+    // read together with the score and the flags, which is where the eye
+    // already goes on a section that needs checking.
+    const clips = Array.isArray(val.evidence_clips) ? val.evidence_clips : [];
+    if (clips.length) anyClips = true;
+    const runScores = val.needs_human_review ? runScoresLine(val.run_scores) : '';
     return `<div class="ai-section-item">
       <div class="ai-section-header">
         <span class="ai-section-name">${escapeHtml(label)}</span>
@@ -1272,6 +1632,8 @@ function renderAiGradingResult(result, container) {
         <div class="ai-detail-col ai-detail-score">
           <span class="ai-detail-label">Score</span>
           <span class="ai-section-badges">${scoreBadge(val.score, val.evidence_basis)}${reviewFlag}</span>
+          ${runScores}
+          ${clipChips(clips, !!audioFileId)}
         </div>
         ${detailColumn('Talked about', covered)}
         ${detailColumn('Missed', missed)}
@@ -1280,22 +1642,68 @@ function renderAiGradingResult(result, container) {
     </div>`;
   }).join('');
 
+  // Kept to one line each — the full explanation still lives in each badge's
+  // hover tooltip, so the footnotes only have to jog the memory, not teach.
   const footnoteLines = [
-    anyNoEvidence ? `<div class="ai-section-footnote"><span class="score-note-mark">*</span> The topic never came up in the recording. It counts as 0 in the total — DECO's rule is that a section with no confident score is a 0, not a blank.</div>` : '',
-    anyInconsistent ? `<div class="ai-section-footnote"><span class="score-note-mark">†</span> The topic did come up, but the 3 AI passes couldn't agree whether there was enough to score it. It counts as 0 in the total — check this one against the recording, because a real score may be hiding behind it.</div>` : '',
-    anyNeedsReview ? `<div class="ai-section-footnote"><strong>Double-check</strong> means the 3 AI passes disagreed on that section by more than 2 points, so it's the least reliable score here — confirm it against the recording before acting on it.</div>` : ''
+    anyNoEvidence ? `<div class="ai-section-footnote"><span class="score-note-mark">*</span> Never came up in the recording. Counts as 0.</div>` : '',
+    anyInconsistent ? `<div class="ai-section-footnote"><span class="score-note-mark">†</span> Came up, but the 3 AI passes couldn't agree if it was scorable. Counts as 0 — worth a listen.</div>` : '',
+    anyNeedsReview ? `<div class="ai-section-footnote"><strong>Double-check</strong> — the 3 AI passes disagreed by more than 2 points. Least reliable score here.</div>` : '',
+    anyClips ? `<div class="ai-section-footnote"><strong>Listen at</strong> — where the AI says it heard what set that score. Approximate, and its reading of the moment can still be wrong: the point is to get you to the right part of the recording fast enough to judge for yourself.</div>` : ''
   ].filter(Boolean);
   const sectionFootnotes = footnoteLines.length
     ? `<div class="ai-section-footnotes">${footnoteLines.join('')}</div>`
     : '';
 
+  // Only offered when there's a file to play. Loading is a click away rather
+  // than automatic — a full session recording is a sizeable download and most
+  // results get read without anyone needing to check a timestamp.
+  const audioBlock = audioFileId
+    ? `<div class="ai-audio">
+        <div class="ai-audio-row">
+          <button type="button" class="btn secondary ai-audio-load">Load recording</button>
+          <span class="ai-audio-hint">${anyClips
+            ? 'Or just click a timestamp below — it loads the audio and jumps straight there.'
+            : 'This session was graded before evidence timestamps existed, so there are no jump points — but you can still listen here.'}</span>
+        </div>
+        <div class="ai-audio-slot"></div>
+        <div class="ai-audio-status"></div>
+      </div>`
+    : '';
+
+  // Entries come back as "Short label: one short explanation". Bolding the bit
+  // before the colon is what makes the three columns skimmable — you can read
+  // just the bold labels and still get the gist. The colon check is deliberately
+  // conservative (short, no sentence punctuation before it) so a sentence that
+  // happens to contain a colon isn't chopped into a fake label.
+  const calloutItem = (text) => {
+    const s = String(text || '').trim();
+    const idx = s.indexOf(':');
+    const head = idx > 0 ? s.slice(0, idx) : '';
+    if (head && head.length <= 42 && !/[.!?]/.test(head)) {
+      return `<div class="ai-callout-item"><strong>${escapeHtml(head)}:</strong> ${escapeHtml(s.slice(idx + 1).trim())}</div>`;
+    }
+    return `<div class="ai-callout-item">${escapeHtml(s)}</div>`;
+  };
+
   const calloutBlock = (label, cls, items) => {
     if (!items || !items.length) return '';
     return `<div class="ai-callout ${cls}">
       <span class="ai-callout-label">${escapeHtml(label)}</span>
-      ${items.map(i => `<div class="ai-callout-item">${escapeHtml(i)}</div>`).join('')}
+      ${items.map(calloutItem).join('')}
     </div>`;
   };
+
+  // One long run-on line arrives here: Gemini's own note plus the consistency /
+  // counted-as-zero flags Code.gs appends, all joined with " | ". Split back
+  // into separate bullets so each thing to check reads as its own item.
+  const reviewerNotes = String(result.notes_for_human_reviewer || '')
+    .split('|').map(s => s.trim().replace(/^[-–—]\s*/, '')).filter(Boolean);
+  const reviewerNotesBlock = reviewerNotes.length
+    ? `<div class="ai-note-block">
+        <span class="ai-note-label">Reviewer notes</span>
+        <ul class="ai-note-list">${reviewerNotes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>
+      </div>`
+    : '';
 
   container.innerHTML = `
     <h4>AI Grading Result</h4>
@@ -1309,6 +1717,7 @@ function renderAiGradingResult(result, container) {
         <span class="ai-stat-value">${certifiedBadge(result.certified)}</span>
       </div>
     </div>
+    ${audioBlock}
     <div class="ai-section-list">${sectionItems}</div>
     ${sectionFootnotes}
     <div class="ai-callouts">
@@ -1317,8 +1726,10 @@ function renderAiGradingResult(result, container) {
       ${calloutBlock('Focus areas', 'focus', result.focus_areas)}
     </div>
     ${result.day1_carryover_notes ? `<p class="ai-note"><strong>Day 1 carryover notes:</strong> ${escapeHtml(result.day1_carryover_notes)}</p>` : ''}
-    ${result.notes_for_human_reviewer ? `<p class="ai-note"><em>Reviewer notes: ${escapeHtml(result.notes_for_human_reviewer)}</em></p>` : ''}
+    ${reviewerNotesBlock}
   `;
+
+  wireEvidencePlayer(container, audioFileId);
 }
 
 /* ---------------------- Recent submissions ---------------------- */
@@ -1334,6 +1745,11 @@ function renderAiGradingResult(result, container) {
 // never disagree with what was actually certified), and only the per-section
 // scores/evidence get rebuilt by reconciling whichever individual runs parse
 // successfully, using the same median-across-runs approach Code.gs uses.
+// Must stay equal to SCORE_SPREAD_FLAG_THRESHOLD in Code.gs, or a session will
+// show a "Double-check" flag when it's freshly graded and lose it when the same
+// session is re-opened from Recent Submissions later.
+const SCORE_SPREAD_FLAG_THRESHOLD = 2;
+
 function reconcileSectionsFromRuns(runs) {
   const keys = new Set();
   runs.forEach(r => Object.keys(r.sections || {}).forEach(k => keys.add(k)));
@@ -1345,17 +1761,45 @@ function reconcileSectionsFromRuns(runs) {
   const pick = (entries, field) => (entries.map(e => e[field]).find(Boolean) || '');
   keys.forEach(key => {
     const entries = runs.map(r => (r.sections && r.sections[key]) || {});
+    // Merged the same way Code.gs merges them (see mergeClips), so a session's
+    // jump points don't move depending on whether you're looking at a fresh
+    // result or the same session re-opened from the log.
+    const clips = mergeClips(entries);
+    const runScores = entries.map(e => (typeof e.score === 'number' ? e.score : null));
     const scored = entries.filter(e => e.evidence_basis !== 'insufficient_evidence' && typeof e.score === 'number');
+
+    // Three outcomes, matching Code.gs's reconcileSection. This used to
+    // collapse to just two — every non-unanimous section became a plain
+    // "insufficient evidence" — which quietly dropped the "†" and
+    // "Double-check" flags from any session re-opened from the log. Those
+    // flags are exactly what the timestamps are here to help check, so a
+    // re-opened session now carries the same flags it was graded with.
     if (scored.length && scored.length === entries.length) {
       const scores = scored.map(e => e.score).sort((a, b) => a - b);
       const mid = Math.floor(scores.length / 2);
       const median = scores.length % 2 ? scores[mid] : (scores[mid - 1] + scores[mid]) / 2;
+      const spread = scores[scores.length - 1] - scores[0];
       sections[key] = {
         score: Math.round(median),
         covered: pick(entries, 'covered') || pick(entries, 'evidence'),
         missed: pick(entries, 'missed'),
         justification: pick(entries, 'justification'),
-        evidence_basis: 'verbal_evidence'
+        evidence_basis: 'verbal_evidence',
+        evidence_clips: clips,
+        run_scores: runScores
+      };
+      if (spread > SCORE_SPREAD_FLAG_THRESHOLD) sections[key].needs_human_review = true;
+    } else if (scored.length) {
+      // Some runs scored it, some said there was nothing to score.
+      sections[key] = {
+        score: null,
+        covered: '',
+        missed: '',
+        justification: 'Runs disagreed on whether this was scorable - check the recording.',
+        evidence_basis: 'inconsistent_across_runs',
+        evidence_clips: clips,
+        run_scores: runScores,
+        needs_human_review: true
       };
     } else {
       sections[key] = {
@@ -1363,7 +1807,9 @@ function reconcileSectionsFromRuns(runs) {
         covered: '',
         missed: '',
         justification: pick(entries, 'justification') || pick(entries, 'evidence'),
-        evidence_basis: 'insufficient_evidence'
+        evidence_basis: 'insufficient_evidence',
+        evidence_clips: clips,
+        run_scores: runScores
       };
     }
   });
@@ -1539,7 +1985,10 @@ async function loadRecentLog() {
           headerRow.classList.add('open');
           detailRow.classList.remove('hidden');
           if (!rendered) {
-            renderAiGradingResult(aiResult, document.getElementById(`log-detail-${i}`));
+            // The audio link in column G is the only place a logged row records
+            // which recording it came from — pull the Drive ID back out of it so
+            // this row's timestamps are clickable too, not just a fresh result's.
+            renderAiGradingResult(aiResult, document.getElementById(`log-detail-${i}`), driveFileIdFromLink(s.audioLink));
             rendered = true;
           }
         }
