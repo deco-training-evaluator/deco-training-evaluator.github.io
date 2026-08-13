@@ -509,15 +509,8 @@
             </label>
           </div>
           <div class="field">
-            <label for="g-grade">Manual grade <span class="field-optional">(optional — not needed for AI grading)</span></label>
-            <select id="g-grade">
-              <option value="">Select…</option>
-              <option value="5 - Excellent">5 — Excellent</option>
-              <option value="4 - Good">4 — Good</option>
-              <option value="3 - Meets bar">3 — Meets bar</option>
-              <option value="2 - Needs work">2 — Needs work</option>
-              <option value="1 - Not ready">1 — Not ready</option>
-            </select>
+            <label for="g-grade">Manual grade <span class="field-optional">(optional — not needed for AI grading; same scale as the rubric — out of <span id="g-grade-max-label">110</span>)</span></label>
+            <input id="g-grade" type="number" min="0" max="110" step="1" placeholder="e.g. 92">
           </div>
           <div class="field">
             <label for="g-feedback">Manual feedback <span class="field-optional">(optional — not needed for AI grading)</span></label>
@@ -883,12 +876,40 @@ function populateTraineeDropdown() {
   });
 })();
 
+// Manual grade is entered on the same 0-max scale as the rubric itself
+// (Training Day maxes out at 110, Team On-Site Day at 50 — see
+// SESSION_MAX_POSSIBLE below), so the field's max/label track whichever
+// session type is currently selected instead of staying fixed at 110.
+(function () {
+  const gradeInput = document.getElementById('g-grade');
+  const maxLabel = document.getElementById('g-grade-max-label');
+  document.querySelectorAll('input[name="session-type"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const max = SESSION_MAX_POSSIBLE[radio.value] || 110;
+      gradeInput.max = max;
+      maxLabel.textContent = max;
+      if (gradeInput.value !== '' && Number(gradeInput.value) > max) gradeInput.value = max;
+    });
+  });
+})();
+
 document.getElementById('grading-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const statusEl = document.getElementById('grade-status');
   const btn = document.getElementById('grade-submit-btn');
   const audioFile = document.getElementById('g-audio').files[0];
   if (!audioFile) { statusEl.textContent = 'Please choose an audio file.'; statusEl.className = 'err'; return; }
+  const sessionTypeForValidation = document.querySelector('input[name="session-type"]:checked').value;
+  const gradeMaxForValidation = SESSION_MAX_POSSIBLE[sessionTypeForValidation] || 110;
+  const rawGradeVal = document.getElementById('g-grade').value.trim();
+  if (rawGradeVal !== '') {
+    const n = Number(rawGradeVal);
+    if (!Number.isFinite(n) || n < 0 || n > gradeMaxForValidation) {
+      statusEl.textContent = `Manual grade must be between 0 and ${gradeMaxForValidation} for ${sessionTypeForValidation}.`;
+      statusEl.className = 'err';
+      return;
+    }
+  }
   if (!(await ensureFreshToken())) return;
 
   btn.disabled = true;
@@ -907,12 +928,14 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     const sessionType = document.querySelector('input[name="session-type"]:checked').value;
     const traineeName = document.getElementById('g-trainee').value;
     const graderName = document.getElementById('g-grader').value;
+    const gradeMax = SESSION_MAX_POSSIBLE[sessionType] || 110;
+    const manualGradeText = rawGradeVal !== '' ? `${rawGradeVal}/${gradeMax}` : '';
     const row = [
       new Date().toISOString(),
       traineeName,
       sessionType,
       graderName,
-      document.getElementById('g-grade').value,
+      manualGradeText,
       document.getElementById('g-feedback').value,
       fileInfo.webViewLink || ''
     ];
