@@ -210,6 +210,19 @@
   }
   td.name-cell { font-weight: 600; white-space: normal; }
   td.region-cell { color: var(--text-secondary); white-space: normal; }
+  /* Dashboard roster table: fixed column widths + wrapping text so all 9
+     columns always fit in the panel with no horizontal scrolling needed. */
+  #dashboard-table-wrap table { table-layout: fixed; }
+  #dashboard-table-wrap th, #dashboard-table-wrap td {
+    white-space: normal;
+    overflow-wrap: break-word;
+    padding: 8px 6px;
+    font-size: 12px;
+  }
+  #dashboard-table-wrap th {
+    font-size: 10.5px;
+    line-height: 1.3;
+  }
   .badge {
     display: inline-flex;
     align-items: center;
@@ -218,6 +231,11 @@
     font-weight: 600;
     padding: 3px 8px;
     border-radius: 999px;
+    white-space: nowrap;
+  }
+  #dashboard-table-wrap .badge {
+    font-size: 11px;
+    padding: 3px 6px;
   }
   .badge.good { color: var(--good); background: color-mix(in srgb, var(--good) 14%, transparent); }
   .badge.warning { color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); }
@@ -751,11 +769,25 @@ function renderDashboardTable() {
 
   const flagCols = ['Day 1 - Meeting Attended','Day 1 - Training Watched','Day 2 - Ops/District Manager Training','Team On-Site Day Completed'];
   const certCols = ['Certified - Team On-Site Days','Certified - Training Days'];
+  // Short header labels keep all 9 columns fitting in one view (no horizontal
+  // scroll); the full column name is still available on hover via title=.
+  const shortLabels = {
+    'Day 1 - Meeting Attended': 'D1 Attended',
+    'Day 1 - Training Watched': 'D1 Watched',
+    'Day 2 - Ops/District Manager Training': 'D2 Training',
+    'Team On-Site Day Completed': 'TOSD Done',
+    'Certified - Team On-Site Days': 'TOSD Cert',
+    'Certified - Training Days': 'Training Cert'
+  };
 
-  let html = '<table><thead><tr>';
+  let html = '<table>';
+  html += '<colgroup><col style="width:13%"><col style="width:11%"><col style="width:11%">'
+    + '<col style="width:11%"><col style="width:11%"><col style="width:11%"><col style="width:11%">'
+    + '<col style="width:10.5%"><col style="width:10.5%"></colgroup>';
+  html += '<thead><tr>';
   html += '<th>Name</th><th>Role</th><th>Region</th>';
-  flagCols.forEach(c => html += `<th>${escapeHtml(c.replace('Day 1 - ','D1: ').replace('Day 2 - ','D2: '))}</th>`);
-  certCols.forEach(c => html += `<th>${escapeHtml(c.replace('Certified - ',''))}</th>`);
+  flagCols.forEach(c => html += `<th title="${escapeHtml(c)}">${escapeHtml(shortLabels[c])}</th>`);
+  certCols.forEach(c => html += `<th title="${escapeHtml(c.replace('Certified - ',''))}">${escapeHtml(shortLabels[c])}</th>`);
   html += '</tr></thead><tbody>';
 
   filtered.forEach(r => {
@@ -781,7 +813,7 @@ function certBadge(val) {
   const isYes = (val || '').trim().toLowerCase() === 'yes';
   return isYes
     ? `<span class="badge good">${checkIcon()}Certified</span>`
-    : `<span class="badge critical">${xIcon()}Not certified</span>`;
+    : `<span class="badge critical" title="Not certified">${xIcon()}Not yet</span>`;
 }
 function checkIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 function xIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>'; }
