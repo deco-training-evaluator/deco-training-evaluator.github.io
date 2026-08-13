@@ -262,6 +262,19 @@
   .field textarea { min-height: 110px; resize: vertical; }
   .radio-row { display: flex; gap: 16px; }
   .radio-row label { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; }
+  .check-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    cursor: pointer;
+  }
+  .check-row input { margin-top: 2px; width: auto; }
+  .field-optional { font-weight: 400; color: var(--text-muted); text-transform: none; letter-spacing: 0; font-size: 12px; }
+  .field select:disabled, .field input:disabled, .field textarea:disabled { opacity: 0.55; cursor: not-allowed; }
   #grade-status { font-size: 13px; margin-top: 4px; }
   #grade-status.ok { color: var(--good); }
   #grade-status.err { color: var(--critical); }
@@ -336,6 +349,21 @@
     white-space: normal;
     overflow-wrap: break-word;
   }
+  .ai-section-badges { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+  .ai-section-detail {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    white-space: normal;
+    overflow-wrap: break-word;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .ai-section-detail .label { font-weight: 600; color: var(--text-primary); }
+  .grade-cell-muted { color: var(--text-muted); }
+  .ai-grade-cell { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
   .ai-callouts {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -475,10 +503,14 @@
           <div class="field">
             <label for="g-grader">Grader (your name)</label>
             <input id="g-grader" type="text" required placeholder="e.g. Jordan Evans">
+            <label class="check-row" for="g-did-not-attend">
+              <input type="checkbox" id="g-did-not-attend">
+              No one attended to grade this manually — just AI-grade the audio
+            </label>
           </div>
           <div class="field">
-            <label for="g-grade">Grade</label>
-            <select id="g-grade" required>
+            <label for="g-grade">Manual grade <span class="field-optional">(optional — not needed for AI grading)</span></label>
+            <select id="g-grade">
               <option value="">Select…</option>
               <option value="5 - Excellent">5 — Excellent</option>
               <option value="4 - Good">4 — Good</option>
@@ -488,8 +520,8 @@
             </select>
           </div>
           <div class="field">
-            <label for="g-feedback">Feedback</label>
-            <textarea id="g-feedback" required placeholder="What went well, what needs work…"></textarea>
+            <label for="g-feedback">Manual feedback <span class="field-optional">(optional — not needed for AI grading)</span></label>
+            <textarea id="g-feedback" placeholder="What went well, what needs work…"></textarea>
           </div>
           <div class="field">
             <label for="g-audio">Audio recording</label>
@@ -828,6 +860,29 @@ function populateTraineeDropdown() {
     rosterRows.map(r => `<option value="${escapeHtml(r['Name'])}">${escapeHtml(r['Name'])} — ${escapeHtml(r['Role'])}</option>`).join('');
 }
 
+// "Did not attend" — manual grading (Grade/Feedback) is optional and should
+// never block AI grading, which only needs the audio + trainee + session
+// type. This checkbox is a convenience for the common case where nobody was
+// there to grade manually: it fills the Grader field with "Did not attend"
+// and disables Grade/Feedback (disabled fields are skipped by HTML5 required
+// validation, so the form can submit straight to AI grading with nothing
+// filled in there).
+(function () {
+  const checkbox = document.getElementById('g-did-not-attend');
+  const graderInput = document.getElementById('g-grader');
+  const gradeSelect = document.getElementById('g-grade');
+  const feedbackInput = document.getElementById('g-feedback');
+  checkbox.addEventListener('change', () => {
+    const checked = checkbox.checked;
+    graderInput.value = checked ? 'Did not attend' : '';
+    graderInput.disabled = checked;
+    gradeSelect.value = '';
+    gradeSelect.disabled = checked;
+    feedbackInput.value = '';
+    feedbackInput.disabled = checked;
+  });
+})();
+
 document.getElementById('grading-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const statusEl = document.getElementById('grade-status');
@@ -866,6 +921,12 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     statusEl.textContent = 'Submitted — thanks!';
     statusEl.className = 'ok';
     document.getElementById('grading-form').reset();
+    // form.reset() restores values/checked state but not the disabled flag
+    // the "did not attend" checkbox sets on Grade/Feedback — clear that too
+    // so a re-enabled, blank manual-grade section is ready for the next entry.
+    document.getElementById('g-grade').disabled = false;
+    document.getElementById('g-feedback').disabled = false;
+    document.getElementById('g-grader').disabled = false;
     loadRecentLog();
 
     // Kick off AI grading in the background — this form only has one name field
@@ -979,12 +1040,26 @@ function renderAiGradingResult(result, container) {
   const maxPossible = SESSION_MAX_POSSIBLE[result.session_type] || '';
   const sectionItems = Object.entries(result.sections || {}).map(([key, val]) => {
     const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const reviewFlag = val.needs_human_review
+      ? `<span class="badge warning" title="AI runs disagreed on this section — verify against the audio">${dashIcon()}Verify</span>`
+      : '';
+    // covered/missed/justification (short phrases/one sentence, added in
+    // Code.gs V5+) replace the old single free-text "evidence" field.
+    // Legacy rows graded before that change only have "evidence" — fall
+    // back to showing that as "covered" so old rows still render sensibly.
+    const covered = val.covered || val.evidence || '';
+    const missed = val.missed || '';
+    const justification = val.justification || '';
     return `<div class="ai-section-item">
       <div class="ai-section-header">
         <span class="ai-section-name">${escapeHtml(label)}</span>
-        ${scoreBadge(val.score, val.evidence_basis)}
+        <span class="ai-section-badges">${scoreBadge(val.score, val.evidence_basis)}${reviewFlag}</span>
       </div>
-      <p class="ai-section-evidence">${escapeHtml(val.evidence || '')}</p>
+      <div class="ai-section-detail">
+        <div><span class="label">Talked about:</span> ${escapeHtml(covered) || '—'}</div>
+        <div><span class="label">Missed:</span> ${escapeHtml(missed) || '—'}</div>
+        ${justification ? `<div><span class="label">Why:</span> ${escapeHtml(justification)}</div>` : ''}
+      </div>
     </div>`;
   }).join('');
 
@@ -1036,17 +1111,33 @@ function reconcileSectionsFromRuns(runs) {
   const keys = new Set();
   runs.forEach(r => Object.keys(r.sections || {}).forEach(k => keys.add(k)));
   const sections = {};
+  // Newer runs (Code.gs V5+) carry covered/missed/justification instead of
+  // one "evidence" string; pick() takes whichever field is actually present
+  // across the runs so older logged rows (pre-V5, "evidence" only) still
+  // reconcile to something sensible instead of showing blank text.
+  const pick = (entries, field) => (entries.map(e => e[field]).find(Boolean) || '');
   keys.forEach(key => {
     const entries = runs.map(r => (r.sections && r.sections[key]) || {});
     const scored = entries.filter(e => e.evidence_basis !== 'insufficient_evidence' && typeof e.score === 'number');
-    const evidenceSamples = entries.map(e => e.evidence || '').filter(Boolean);
     if (scored.length && scored.length === entries.length) {
       const scores = scored.map(e => e.score).sort((a, b) => a - b);
       const mid = Math.floor(scores.length / 2);
       const median = scores.length % 2 ? scores[mid] : (scores[mid - 1] + scores[mid]) / 2;
-      sections[key] = { score: Math.round(median), evidence: evidenceSamples[0] || '', evidence_basis: 'verbal_evidence' };
+      sections[key] = {
+        score: Math.round(median),
+        covered: pick(entries, 'covered') || pick(entries, 'evidence'),
+        missed: pick(entries, 'missed'),
+        justification: pick(entries, 'justification'),
+        evidence_basis: 'verbal_evidence'
+      };
     } else {
-      sections[key] = { score: null, evidence: evidenceSamples[0] || '', evidence_basis: 'insufficient_evidence' };
+      sections[key] = {
+        score: null,
+        covered: '',
+        missed: '',
+        justification: pick(entries, 'justification') || pick(entries, 'evidence'),
+        evidence_basis: 'insufficient_evidence'
+      };
     }
   });
   return sections;
@@ -1087,6 +1178,17 @@ function parseAiResultFromRow(r) {
   };
 }
 
+// Compact "12/110 · Certified" style summary for the AI Grade column.
+function aiGradeSummaryCell(aiRow) {
+  const total = aiRow[8];
+  const max = aiRow[9];
+  const certified = aiRow[10];
+  const scoreText = (total !== '' && total != null)
+    ? escapeHtml(String(total)) + (max ? '/' + escapeHtml(String(max)) : '')
+    : 'N/A';
+  return `<span class="ai-grade-cell">${scoreText} · ${certifiedBadge(certified)}</span>`;
+}
+
 async function loadRecentLog() {
   const wrap = document.getElementById('recent-log-wrap');
   wrap.innerHTML = '<div class="empty-state">Loading…</div>';
@@ -1095,35 +1197,87 @@ async function loadRecentLog() {
     const rows = await sheetsGet(GRADING_SHEET_ID, 'A1:S1000');
     if (rows.length <= 1) { wrap.innerHTML = '<div class="empty-state">No submissions yet.</div>'; return; }
     // Track each row's real sheet row number (1-indexed, header is row 1) before
-    // filtering out blanks, so a delete can clear the exact right row later.
+    // filtering out blanks, so a delete can clear the exact right row(s) later.
     const withRowNum = rows.slice(1).map((r, idx) => ({ rowNumber: idx + 2, r })).filter(x => x.r.some(c => c));
-    const body = withRowNum.slice(-10).reverse();
 
-    // Pre-parse each row's AI result (column S, index 18) so we know which rows are expandable.
-    const parsedAi = body.map(({ r }) => parseAiResultFromRow(r));
+    // Each form submission writes up to TWO sheet rows: a manual-grade row
+    // (Source blank, columns A-G) written immediately, and a separate AI-grade
+    // row (Source = "AI", columns A-S) written a minute or two later by
+    // Code.gs. Both carry the same Audio File Link (column G / index 6), so
+    // group by that link into one merged submission with its own Manual
+    // Grade and AI Grade columns, instead of showing two separate rows for
+    // what was really one session.
+    const byAudioLink = new Map();
+    const noLink = [];
+    withRowNum.forEach(entry => {
+      const link = entry.r[6];
+      if (!link) { noLink.push(entry); return; }
+      if (!byAudioLink.has(link)) byAudioLink.set(link, []);
+      byAudioLink.get(link).push(entry);
+    });
 
-    let html = '<table class="log-table"><thead><tr><th></th><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Grade</th><th>Audio</th><th></th></tr></thead><tbody>';
-    body.forEach(({ r, rowNumber }, i) => {
-      const when = r[0] ? new Date(r[0]).toLocaleString() : '';
-      const audioCell = r[6] ? `<a href="${escapeHtml(r[6])}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Listen</a>` : '';
+    const submissions = [];
+    byAudioLink.forEach(entries => {
+      const manual = entries.find(e => e.r[7] !== 'AI');
+      const ai = entries.find(e => e.r[7] === 'AI');
+      const base = (manual || ai).r;
+      submissions.push({
+        order: (manual || ai).rowNumber,
+        rowNumbers: entries.map(e => e.rowNumber),
+        when: base[0], trainee: base[1], type: base[2],
+        grader: (manual && manual.r[3]) || (ai && ai.r[3]) || '',
+        manualGrade: manual ? manual.r[4] : '',
+        audioLink: base[6],
+        aiRow: ai ? ai.r : null
+      });
+    });
+    // Rows with no audio link shouldn't normally happen, but show them
+    // individually rather than silently dropping them.
+    noLink.forEach(({ r, rowNumber }) => {
+      submissions.push({
+        order: rowNumber, rowNumbers: [rowNumber],
+        when: r[0], trainee: r[1], type: r[2], grader: r[3],
+        manualGrade: r[7] === 'AI' ? '' : r[4],
+        audioLink: r[6],
+        aiRow: r[7] === 'AI' ? r : null
+      });
+    });
+
+    submissions.sort((a, b) => a.order - b.order);
+    const body = submissions.slice(-10).reverse();
+
+    // Pre-parse each merged submission's AI result (from its AI row's column S) so we know which are expandable.
+    const parsedAi = body.map(s => s.aiRow ? parseAiResultFromRow(s.aiRow) : null);
+
+    let html = '<table class="log-table"><thead><tr><th></th><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Manual Grade</th><th>AI Grade</th><th>Audio</th><th></th></tr></thead><tbody>';
+    body.forEach((s, i) => {
+      const when = s.when ? new Date(s.when).toLocaleString() : '';
+      const audioCell = s.audioLink ? `<a href="${escapeHtml(s.audioLink)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Listen</a>` : '';
       const hasAi = !!parsedAi[i];
       const chevron = hasAi ? '<span class="log-chevron">&#9656;</span>' : '';
+      const manualGradeCell = s.manualGrade
+        ? escapeHtml(s.manualGrade)
+        : `<span class="grade-cell-muted">${s.grader === 'Did not attend' ? '—' : 'None'}</span>`;
+      const aiGradeCell = hasAi
+        ? aiGradeSummaryCell(s.aiRow)
+        : `<span class="grade-cell-muted">${s.audioLink ? 'Pending…' : 'N/A'}</span>`;
+      const rowsAttr = s.rowNumbers.join(',');
       const deleteCell = `<td class="log-delete-cell">` +
-        `<button type="button" class="log-delete-btn" data-row-index="${i}" data-sheet-row="${rowNumber}" title="Delete this submission">${trashIcon()}<span class="log-delete-label">Delete</span></button>` +
+        `<button type="button" class="log-delete-btn" data-row-index="${i}" data-sheet-rows="${rowsAttr}" title="Delete this submission">${trashIcon()}<span class="log-delete-label">Delete</span></button>` +
         `</td>`;
-      html += `<tr class="log-row${hasAi ? ' has-ai' : ''}" data-row-index="${i}" data-sheet-row="${rowNumber}">` +
+      html += `<tr class="log-row${hasAi ? ' has-ai' : ''}" data-row-index="${i}">` +
         `<td class="log-chevron-cell">${chevron}</td>` +
-        `<td>${escapeHtml(when)}</td><td>${escapeHtml(r[1])}</td><td>${escapeHtml(r[2])}</td>` +
-        `<td>${escapeHtml(r[3])}</td><td>${escapeHtml(r[4])}</td><td>${audioCell}</td>${deleteCell}</tr>`;
+        `<td>${escapeHtml(when)}</td><td>${escapeHtml(s.trainee)}</td><td>${escapeHtml(s.type)}</td>` +
+        `<td>${escapeHtml(s.grader)}</td><td>${manualGradeCell}</td><td>${aiGradeCell}</td><td>${audioCell}</td>${deleteCell}</tr>`;
       if (hasAi) {
-        html += `<tr class="log-detail-row hidden" data-row-index="${i}"><td colspan="8"><div class="ai-result-box" id="log-detail-${i}"></div></td></tr>`;
+        html += `<tr class="log-detail-row hidden" data-row-index="${i}"><td colspan="9"><div class="ai-result-box" id="log-detail-${i}"></div></td></tr>`;
       }
     });
     html += '</tbody></table>';
     wrap.innerHTML = html;
 
     // Wire up click-to-expand on rows that have an AI result, one open at a time.
-    body.forEach(({ r }, i) => {
+    body.forEach((s, i) => {
       const aiResult = parsedAi[i];
       if (!aiResult) return;
       const headerRow = wrap.querySelector(`tr.log-row[data-row-index="${i}"]`);
@@ -1152,6 +1306,8 @@ async function loadRecentLog() {
     // a few seconds if not confirmed), second click while armed actually deletes.
     // Deleting clears the row's values in the sheet rather than shifting rows
     // around, and there is no in-app undo — it's a real removal, not a soft-delete.
+    // A merged submission can be backed by up to 2 real sheet rows (manual +
+    // AI) — data-sheet-rows carries a comma-separated list so both get cleared.
     wrap.querySelectorAll('.log-delete-btn').forEach(btn => {
       let armTimeout = null;
       btn.addEventListener('click', async (event) => {
@@ -1168,13 +1324,15 @@ async function loadRecentLog() {
         clearTimeout(armTimeout);
         btn.disabled = true;
         btn.querySelector('.log-delete-label').textContent = 'Deleting…';
-        const rowNumber = btn.getAttribute('data-sheet-row');
+        const rowNumbers = (btn.getAttribute('data-sheet-rows') || '').split(',').filter(Boolean);
         const rowIndex = btn.getAttribute('data-row-index');
         const headerRow = wrap.querySelector(`tr.log-row[data-row-index="${rowIndex}"]`);
         const detailRow = wrap.querySelector(`tr.log-detail-row[data-row-index="${rowIndex}"]`);
         if (headerRow) headerRow.classList.add('deleting');
         try {
-          await sheetsClearRange(GRADING_SHEET_ID, `A${rowNumber}:S${rowNumber}`);
+          for (const rowNumber of rowNumbers) {
+            await sheetsClearRange(GRADING_SHEET_ID, `A${rowNumber}:S${rowNumber}`);
+          }
           if (detailRow) detailRow.remove();
           if (headerRow) headerRow.remove();
           if (!wrap.querySelector('tr.log-row')) {
