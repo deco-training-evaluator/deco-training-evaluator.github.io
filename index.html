@@ -988,6 +988,73 @@ function renderAiGradingResult(result, container) {
 }
 
 /* ---------------------- Recent submissions ---------------------- */
+
+// Column S ("AI Raw JSON") holds one of two shapes depending on when the row
+// was graded: older rows have a single JSON result object; newer rows (once
+// Code.gs added multi-run consensus grading) hold EVERY run's raw JSON text
+// concatenated together, separated by a "----- next run -----" marker, so
+// the actual reconciled result Code.gs used for total_score/certified isn't
+// stored as one clean object anymore. This reconstructs an equivalent result:
+// the authoritative total_score/certified/strong/weak/focus/day1/reviewer-notes
+// come straight from their own already-computed sheet columns (so they can
+// never disagree with what was actually certified), and only the per-section
+// scores/evidence get rebuilt by reconciling whichever individual runs parse
+// successfully, using the same median-across-runs approach Code.gs uses.
+function reconcileSectionsFromRuns(runs) {
+  const keys = new Set();
+  runs.forEach(r => Object.keys(r.sections || {}).forEach(k => keys.add(k)));
+  const sections = {};
+  keys.forEach(key => {
+    const entries = runs.map(r => (r.sections && r.sections[key]) || {});
+    const scored = entries.filter(e => e.evidence_basis !== 'insufficient_evidence' && typeof e.score === 'number');
+    const evidenceSamples = entries.map(e => e.evidence || '').filter(Boolean);
+    if (scored.length && scored.length === entries.length) {
+      const scores = scored.map(e => e.score).sort((a, b) => a - b);
+      const mid = Math.floor(scores.length / 2);
+      const median = scores.length % 2 ? scores[mid] : (scores[mid - 1] + scores[mid]) / 2;
+      sections[key] = { score: Math.round(median), evidence: evidenceSamples[0] || '', evidence_basis: 'verbal_evidence' };
+    } else {
+      sections[key] = { score: null, evidence: evidenceSamples[0] || '', evidence_basis: 'insufficient_evidence' };
+    }
+  });
+  return sections;
+}
+
+function parseAiResultFromRow(r) {
+  const raw = r[18];
+  if (!raw) return null;
+
+  // Older rows: one plain JSON result object.
+  try {
+    const single = JSON.parse(raw);
+    if (single && single.sections) return single;
+  } catch (e) { /* not a single JSON object — try the multi-run format below */ }
+
+  // Newer rows: N runs' raw JSON, concatenated with a text separator.
+  const chunks = raw.split(/-{3,}\s*next run\s*-{3,}/i).map(c => c.trim()).filter(Boolean);
+  const runs = [];
+  chunks.forEach(chunk => {
+    try {
+      const parsed = JSON.parse(chunk);
+      if (parsed && parsed.sections) runs.push(parsed);
+    } catch (e) { /* skip a single unparseable run rather than losing the whole row */ }
+  });
+  if (!runs.length) return null;
+
+  const splitList = s => (s || '').split('\n').map(x => x.trim()).filter(Boolean);
+  return {
+    session_type: r[2] || runs[0].session_type,
+    sections: reconcileSectionsFromRuns(runs),
+    total_score: (r[8] !== '' && r[8] != null) ? Number(r[8]) : null,
+    certified: r[10] || null,
+    strong_areas: splitList(r[12]),
+    weak_areas: splitList(r[13]),
+    focus_areas: splitList(r[14]),
+    day1_carryover_notes: r[15] || '',
+    notes_for_human_reviewer: r[16] || ''
+  };
+}
+
 async function loadRecentLog() {
   const wrap = document.getElementById('recent-log-wrap');
   wrap.innerHTML = '<div class="empty-state">Loading…</div>';
@@ -1000,11 +1067,8 @@ async function loadRecentLog() {
     const withRowNum = rows.slice(1).map((r, idx) => ({ rowNumber: idx + 2, r })).filter(x => x.r.some(c => c));
     const body = withRowNum.slice(-10).reverse();
 
-    // Pre-parse each row's AI JSON (column S, index 18) so we know which rows are expandable.
-    const parsedAi = body.map(({ r }) => {
-      if (!r[18]) return null;
-      try { return JSON.parse(r[18]); } catch (e) { return null; }
-    });
+    // Pre-parse each row's AI result (column S, index 18) so we know which rows are expandable.
+    const parsedAi = body.map(({ r }) => parseAiResultFromRow(r));
 
     let html = '<table class="log-table"><thead><tr><th></th><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Grade</th><th>Audio</th><th></th></tr></thead><tbody>';
     body.forEach(({ r, rowNumber }, i) => {
