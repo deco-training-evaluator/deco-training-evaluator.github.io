@@ -434,6 +434,27 @@
   .check-row input { margin-top: 2px; width: auto; }
   .field-optional { font-weight: 400; color: var(--text-muted); text-transform: none; letter-spacing: 0; font-size: 12px; }
   .field select:disabled, .field input:disabled, .field textarea:disabled { opacity: 0.55; cursor: not-allowed; }
+  /* Says what submitting is about to do to the Dashboard, before it's done.
+     Deliberately inline rather than a popup after the fact: a certification
+     that flips from a mistyped score should be caught while the score is still
+     on screen and editable, not confirmed a minute later after the upload. */
+  .cert-preview {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--text-muted) 7%, transparent);
+  }
+  .cert-preview.will-certify {
+    color: var(--good);
+    border-color: color-mix(in srgb, var(--good) 40%, transparent);
+    background: color-mix(in srgb, var(--good) 10%, transparent);
+  }
+  .cert-preview strong { font-weight: 700; }
+  .cert-preview svg { width: 13px; height: 13px; vertical-align: -2px; }
   #grade-status { font-size: 13px; margin-top: 4px; }
   #grade-status.ok { color: var(--good); }
   #grade-status.err { color: var(--critical); }
@@ -1155,6 +1176,11 @@
           <div class="field">
             <label for="g-grade">Manual grade <span class="field-optional">(optional — not needed for AI grading; same scale as the rubric — out of <span id="g-grade-max-label">110</span>)</span></label>
             <input id="g-grade" type="number" min="0" max="110" step="1" placeholder="e.g. 92">
+            <label class="check-row" for="g-all-sections-pass">
+              <input type="checkbox" id="g-all-sections-pass">
+              Every section scored 6 or higher
+            </label>
+            <div id="g-cert-preview" class="cert-preview hidden"></div>
           </div>
           <div class="field">
             <label for="g-feedback">Manual feedback <span class="field-optional">(optional — not needed for AI grading)</span></label>
@@ -1307,6 +1333,11 @@ const ROSTER_COLS = [
   'Day 2 - Ops/District Manager Training','Team On-Site Day Completed',
   'Certified - Team On-Site Days','Certified - Training Days','Notes'
 ];
+
+// Where each person's real row number in the Roster sheet is stashed. Prefixed
+// so it can't collide with a column somebody adds to the Sheet — every other
+// key on a roster object is a literal header from row 1.
+const ROSTER_ROW_NUMBER = '__rowNumber';
 
 /* ---------------------- Auth persistence ----------------------
    Google's token client only ever hands back a short-lived (~1hr) access
@@ -1646,12 +1677,17 @@ function applySessionTypeToForm(liveTab) {
   gradeInput.placeholder = `e.g. ${Math.round(max * 0.84)}`;
   document.getElementById('g-trainee-label').textContent =
     liveTab.sessionType === 'Team On-Site Day' ? 'Person being observed' : 'Trainee';
+  // The pass mark moves with the tab (85 of 110 vs 38 of 50), so a grade left
+  // in the box must be re-read against the new bar rather than keep the old
+  // tab's verdict on screen.
+  renderCertPreview();
 }
 
 function resetGradingPanel() {
   const form = document.getElementById('grading-form');
   form.reset();
-  ['g-grade', 'g-feedback', 'g-grader'].forEach(id => { document.getElementById(id).disabled = false; });
+  ['g-grade', 'g-feedback', 'g-grader', 'g-all-sections-pass'].forEach(id => { document.getElementById(id).disabled = false; });
+  renderCertPreview();
   const statusEl = document.getElementById('grade-status');
   statusEl.textContent = '';
   statusEl.className = '';
@@ -1730,11 +1766,20 @@ async function loadRoster() {
     const rows = await sheetsGet(ROSTER_SHEET_ID, 'A1:Z1000');
     if (!rows.length) { wrap.innerHTML = '<div class="empty-state">Roster sheet is empty.</div>'; return; }
     rosterHeaders = rows[0];
-    rosterRows = rows.slice(1).filter(r => r.some(c => c && c.trim())).map(r => {
-      const obj = {};
-      rosterHeaders.forEach((h, i) => obj[h] = r[i] || '');
-      return obj;
-    });
+    // The sheet row number is stamped on each person BEFORE blank rows are
+    // filtered out. Position in this array is not the row in the Sheet — one
+    // empty row anywhere above someone would shift every write below it onto
+    // the wrong person, which for a certification column means signing off
+    // somebody who wasn't graded.
+    rosterRows = rows.slice(1)
+      .map((r, i) => ({ cells: r, rowNumber: i + 2 })) // +2: 1-based, and row 1 is the header
+      .filter(({ cells }) => cells.some(c => c && c.trim()))
+      .map(({ cells, rowNumber }) => {
+        const obj = {};
+        rosterHeaders.forEach((h, i) => obj[h] = cells[i] || '');
+        obj[ROSTER_ROW_NUMBER] = rowNumber;
+        return obj;
+      });
     populateFilterOptions();
     populateTraineeDropdown();
     renderDashboardTable();
@@ -1999,6 +2044,7 @@ function populateTraineeDropdown() {
   const graderInput = document.getElementById('g-grader');
   const gradeSelect = document.getElementById('g-grade');
   const feedbackInput = document.getElementById('g-feedback');
+  const allSectionsBox = document.getElementById('g-all-sections-pass');
   checkbox.addEventListener('change', () => {
     const checked = checkbox.checked;
     graderInput.value = checked ? 'Did not attend' : '';
@@ -2007,8 +2053,115 @@ function populateTraineeDropdown() {
     gradeSelect.disabled = checked;
     feedbackInput.value = '';
     feedbackInput.disabled = checked;
+    // Nobody graded it, so there are no sections to vouch for.
+    allSectionsBox.checked = false;
+    allSectionsBox.disabled = checked;
+    renderCertPreview();
   });
 })();
+
+/* ---------------- Certifying from a manual grade ----------------
+   A manual grade is a human's decision, so — unlike an AI grade, which stays
+   advisory until Phase 5 — it's allowed to tick the certification column on
+   the Roster and flip the Dashboard badge.
+
+   The catch is that the form captures one total, and DECO's certification rule
+   has two halves: the total at or above the bar AND every section at 6 or
+   better. A total can't answer the second half — 88/110 with a 4 in
+   Replacements 101 is not a pass — so the grader ticks a box to say the
+   sections cleared it. Without that tick nothing is written, because a
+   certification that appears on its own from a number that didn't actually
+   earn it is worse than one typed into the Sheet by hand.
+
+   This only ever writes "Yes". A grade under the bar leaves the cell alone: a
+   weak session doesn't revoke a certification somebody already holds, and
+   that's a call for a manager, not for a form. */
+
+// Both halves of the Smartsheet formula, or nothing.
+function manualGradeCertifies(sessionType, rawGrade, everySectionPassed) {
+  if (!everySectionPassed) return false;
+  // No published pass mark, or nowhere on the Roster to record it (the four
+  // preview session types have neither) — never auto-certify on a guess.
+  const threshold = SESSION_PASS_THRESHOLD[sessionType];
+  if (!threshold || !SESSION_CERT_COLUMN[sessionType]) return false;
+  if (rawGrade === '') return false;
+  const total = Number(rawGrade);
+  return Number.isFinite(total) && total >= threshold;
+}
+
+// 0-based column index to a Sheets column letter. The certification column is
+// found by header name rather than hardcoded, so inserting a column in the
+// Roster can't silently redirect the write onto its neighbour.
+function columnLetter(index) {
+  let letters = '';
+  for (let n = index; n >= 0; n = Math.floor(n / 26) - 1) {
+    letters = String.fromCharCode(65 + (n % 26)) + letters;
+  }
+  return letters;
+}
+
+// Tick this person's certification column. Returns a plain sentence for the
+// status line describing what happened — including the cases where nothing
+// was written, which must never pass silently as success.
+async function certifyOnRoster(name, sessionType) {
+  const column = SESSION_CERT_COLUMN[sessionType];
+  const person = rosterPerson(name);
+  if (!column) return `${sessionType} has no certification column on the Roster, so the Dashboard is unchanged.`;
+  if (!person) return `Dashboard not updated — "${name}" isn't on the Roster.`;
+  if (isAlreadyCertified(name, sessionType)) return `${name} was already certified for ${sessionType}.`;
+  const colIndex = rosterHeaders.indexOf(column);
+  if (colIndex === -1) return `Dashboard not updated — the Roster has no "${column}" column.`;
+  const cell = `${columnLetter(colIndex)}${person[ROSTER_ROW_NUMBER]}`;
+  // "Yes" is exactly what certBadge() reads to paint the green badge, and what
+  // anyone updating the Roster by hand types.
+  await sheetsBatchUpdate(ROSTER_SHEET_ID, [{ range: cell, values: [['Yes']] }]);
+  return `${name} is now certified for ${sessionType} on the Dashboard.`;
+}
+
+// Says what pressing Submit will do to the Dashboard, while the score is still
+// on screen and editable. The "below the bar" case is spelled out too — it
+// answers "why didn't it certify?" before it gets asked.
+function renderCertPreview() {
+  const el = document.getElementById('g-cert-preview');
+  if (!el) return;
+  const name = document.getElementById('g-trainee').value.trim();
+  const gradeInput = document.getElementById('g-grade');
+  const rawGrade = gradeInput.disabled ? '' : gradeInput.value.trim();
+  const ticked = document.getElementById('g-all-sections-pass').checked;
+  const sessionType = currentSessionType;
+  const threshold = SESSION_PASS_THRESHOLD[sessionType];
+  const max = SESSION_MAX_POSSIBLE[sessionType] || 110;
+
+  const hide = () => { el.classList.add('hidden'); el.classList.remove('will-certify'); el.innerHTML = ''; };
+  // Nothing to say until there's a grade to say it about.
+  if (rawGrade === '' || !threshold || !SESSION_CERT_COLUMN[sessionType]) return hide();
+  const total = Number(rawGrade);
+  if (!Number.isFinite(total) || total < 0 || total > max) return hide();
+
+  const who = name ? escapeHtml(name) : 'this person';
+  let html;
+  let willCertify = false;
+  if (total < threshold) {
+    html = `<strong>${total}/${max} is under the ${threshold} needed to certify</strong> — the Dashboard won't change.`;
+  } else if (isAlreadyCertified(name, sessionType)) {
+    html = `${who} is already certified for ${sessionType} — the Dashboard won't change.`;
+  } else if (!ticked) {
+    html = `${total}/${max} clears the ${threshold} bar. Certifying also needs every section at 6 or better — ` +
+      `<strong>tick the box above</strong> to mark ${who} certified for ${sessionType}.`;
+  } else {
+    willCertify = true;
+    html = `${checkIcon()} <strong>Submitting will mark ${who} as certified for ${sessionType}</strong> on the Dashboard.`;
+  }
+  el.innerHTML = html;
+  el.classList.toggle('will-certify', willCertify);
+  el.classList.remove('hidden');
+}
+
+['g-trainee', 'g-grade', 'g-all-sections-pass'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', renderCertPreview);
+  el.addEventListener('change', renderCertPreview);
+});
 
 document.getElementById('grading-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -2019,6 +2172,8 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
   const sessionTypeForValidation = currentSessionType;
   const gradeMaxForValidation = SESSION_MAX_POSSIBLE[sessionTypeForValidation] || 110;
   const rawGradeVal = document.getElementById('g-grade').value.trim();
+  // Read before the form is reset further down — by then the box is clear.
+  const everySectionPassed = document.getElementById('g-all-sections-pass').checked;
   if (rawGradeVal !== '') {
     const n = Number(rawGradeVal);
     if (!Number.isFinite(n) || n < 0 || n > gradeMaxForValidation) {
@@ -2061,7 +2216,25 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     ];
     await sheetsAppend(GRADING_SHEET_ID, 'A1:G1', row);
 
-    statusEl.textContent = 'Submitted — thanks!';
+    // The grade is saved at this point. Certifying is a second, separate write
+    // to a different Sheet, so it's kept out of the try/catch above: if the
+    // Roster write fails the submission still stands, and the message says
+    // exactly what to go tick by hand rather than implying the whole thing
+    // failed.
+    let certNote = '';
+    if (manualGradeCertifies(sessionType, rawGradeVal, everySectionPassed)) {
+      statusEl.textContent = 'Updating the Dashboard…';
+      try {
+        certNote = ' ' + await certifyOnRoster(traineeName, sessionType);
+        await loadRoster();
+      } catch (certErr) {
+        console.error(certErr);
+        certNote = ` The grade saved, but the Dashboard couldn't be updated (${certErr.message}) — ` +
+          `mark ${traineeName} certified on the Roster by hand.`;
+      }
+    }
+
+    statusEl.textContent = 'Submitted — thanks!' + certNote;
     statusEl.className = 'ok';
     document.getElementById('grading-form').reset();
     // form.reset() restores values/checked state but not the disabled flag
@@ -2070,6 +2243,8 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     document.getElementById('g-grade').disabled = false;
     document.getElementById('g-feedback').disabled = false;
     document.getElementById('g-grader').disabled = false;
+    document.getElementById('g-all-sections-pass').disabled = false;
+    renderCertPreview();
     loadRecentLog();
 
     // Kick off AI grading in the background — this form only has one name field
