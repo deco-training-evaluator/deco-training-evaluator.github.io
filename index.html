@@ -613,6 +613,55 @@
     border-color: color-mix(in srgb, var(--critical) 32%, transparent);
   }
   .badge svg { width: 12px; height: 12px; flex: none; }
+  /* -------- Editing the roster from the Dashboard --------
+     Every status badge on the Dashboard is also the control that sets it, so a
+     manager can tick a training step or a certification off the roster itself
+     instead of opening the Sheet.
+
+     The button is a bare wrapper around the badge that was already there, so a
+     row looks exactly as it did at rest. What says it's editable is the pointer
+     and the hover lift, plus the hint above the table — 30 rows x 6 columns of
+     "click me" styling would drown out the statuses themselves. */
+  .badge-toggle {
+    display: inline-flex;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+    border-radius: 999px;
+  }
+  .badge-toggle .badge { transition: transform 120ms var(--ease), box-shadow 120ms var(--ease); }
+  .badge-toggle:hover:not(:disabled) .badge { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+  .badge-toggle:active:not(:disabled) .badge { transform: translateY(0); }
+  .badge-toggle:focus-visible { outline: none; box-shadow: var(--ring); }
+  .badge-toggle:disabled { cursor: progress; }
+  /* Armed — the NEXT click is the one that writes. Certification columns only:
+     a training step flips on the first click, because getting one wrong is a
+     click away from being right, where signing somebody off (or taking a
+     sign-off away) is worth a second look. */
+  .badge-toggle.armed .badge {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-orange) 45%, transparent);
+  }
+  /* "Saving…" is deliberately NOT the pending tone. Half the badges it replaces
+     already say "Pending" in that exact colour, so the in-flight state would
+     have been almost invisible — and measured, --pending text is only 1.9:1 at
+     this size in light mode. Neutral and high-contrast instead: it reads as
+     "working" rather than as one more status. */
+  .badge.saving {
+    color: var(--text-primary);
+    background: var(--sunken);
+    border-color: var(--border-strong);
+  }
+  /* The change lands in a different Sheet from the one on screen, so it says so
+     in words rather than leaving the badge flip to speak for itself. */
+  .edit-status {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--good);
+    margin: 0 0 10px;
+  }
+  .edit-status:empty { display: none; margin: 0; }
   form.grading-form { display: flex; flex-direction: column; gap: 18px; max-width: 580px; }
   .field label {
     display: block;
@@ -929,6 +978,57 @@
   }
   .stat-card.is-good .stat-card-bar span { background: linear-gradient(90deg, color-mix(in srgb, var(--good) 65%, white), var(--good)); }
   .stat-card.is-alert .stat-card-value { color: var(--warning); }
+  /* ---- The role breakdown inside the roster card ----
+     Two columns — the count, then the role — rather than one centred sentence
+     per role, so the counts line up down the card the way the table's numbers
+     do. The roles are whatever the Roster's Role column actually holds, so a
+     role nobody has used yet appears the day somebody is given it. */
+  .stat-roles {
+    display: grid;
+    grid-template-columns: auto auto;
+    justify-content: center;
+    column-gap: 9px;
+    row-gap: 3px;
+  }
+  .stat-role-n {
+    text-align: right;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+  }
+  .stat-role-label { text-align: left; }
+  /* ---- What the strip is counting ----
+     Names the slice of the roster the figures below cover. Only the two
+     dropdowns narrow them — the name search doesn't — and this line says so
+     rather than leaving someone to work out why 16 stayed 16 while the table
+     dropped to one row. */
+  .stat-scope {
+    margin: 0 0 13px;
+    text-align: center;
+    font-size: 11.5px;
+    line-height: 2;
+    color: var(--text-secondary);
+  }
+  .stat-scope:empty { display: none; }
+  /* Deliberately one colour for the whole line, including the search caveat at
+     the end of it. Quietening that clause with --text-muted measured 3.25:1 on
+     --page, and it's a full sentence somebody has to be able to read — the chips
+     already carry enough emphasis to break the line up without it. */
+  .stat-scope-chip {
+    display: inline-flex;
+    align-items: center;
+    margin: 0 1px;
+    padding: 3px 11px;
+    border-radius: 999px;
+    /* Measured: --accent on its own 13% tint over --page is 3.85:1, and bold
+       11.5px is nowhere near WCAG large text. The same mix the alert-bar titles
+       use darkens it on light and lightens it on dark — 5.3 / 8.7. Not a
+       tidy-up candidate; putting var(--accent) back here fails AA. */
+    color: color-mix(in srgb, var(--accent) 78%, var(--text-primary));
+    background: color-mix(in srgb, var(--brand-orange) 13%, transparent);
+    border: 1px solid color-mix(in srgb, var(--brand-orange) 34%, transparent);
+    font-weight: 700;
+  }
   .hidden { display: none !important; }
   .recent-log { margin-top: 32px; }
   /* Reads as a section divider inside the card, not a stray bit of small caps:
@@ -1732,10 +1832,16 @@
         <strong>Certification rule:</strong> once someone has attended the Day 1 meeting/training and watched a
         team on-site day, they can go on team visits without being certified — but they can't run a training
         session themselves until they're certified on training days.
+        <br><strong>Changing a status:</strong> click any badge in the table to change it — it writes straight
+        back to the Roster sheet. The four training steps flip on one click; the two certification columns ask
+        you to click again to confirm.
       </div>
       <!-- Where the roster stands, above the roster itself. Everything here is
            counted from data already loaded (renderDashboardStats) — no extra
-           Sheet read, and nothing is shown that the table below doesn't also say. -->
+           Sheet read, and nothing is shown that the table below doesn't also say.
+           The scope line names which slice of the roster is being counted, since
+           the region and role dropdowns narrow these figures. -->
+      <p id="dashboard-stats-scope" class="stat-scope"></p>
       <div id="dashboard-stats" class="stat-strip" aria-live="polite"></div>
       <div class="panel">
         <div class="filters">
@@ -1744,6 +1850,13 @@
           <input id="filter-search" type="text" placeholder="Search name…">
           <button id="refresh-dashboard-btn" class="btn secondary">Refresh</button>
         </div>
+        <!-- A roster edit writes to a Sheet nobody is looking at, so both
+             outcomes are said out loud here: a failure in the loud alert-bar
+             shell (which also scrolls itself into view, since the badge that
+             failed can be a long way down the table), a success in one quiet
+             line that clears itself. -->
+        <div id="dashboard-edit-error"></div>
+        <div id="dashboard-edit-status" class="edit-status" aria-live="polite"></div>
         <div id="dashboard-table-wrap">
           <div class="empty-state">Loading roster…</div>
         </div>
@@ -1989,45 +2102,174 @@ const ROSTER_ROW_NUMBER = '__rowNumber';
    this page. */
 const TOKEN_STORAGE_KEY = 'decoTrainingTracker.googleToken';
 let tokenRefreshTimer = null;
+let tokenWatchdogTimer = null;
 let pendingSilentResolve = null;
+// One renewal at a time. The watchdog, the timer, a tab regaining focus and an
+// API call can all decide the token needs renewing within the same second;
+// without this they'd fire three overlapping requests at Google, and the losers
+// would time out and be recorded as failures.
+let silentRenewInFlight = null;
+let silentRenewStartedAt = 0;
+let silentRenewSeq = 0;
+let renewFailureCount = 0;
+// Whether the app is currently showing its signed-in UI. Guards the watchdog
+// (so it doesn't poke Google behind the sign-in screen) and stops a
+// late-arriving token from re-running every data load underneath someone.
+let signedInUi = false;
+
+// Renewal starts with 5 minutes of token life still in hand, not 2. That's the
+// window a retry has to succeed in before anything the user does can hit an
+// expired token — and the whole reason this file used to sign people out
+// mid-session is that one missed renewal had no second chance.
+const RENEW_LEAD_MS = 5 * 60 * 1000;
+const WATCHDOG_INTERVAL_MS = 30 * 1000;
+// Google's silent flow normally answers in well under a second; this only
+// matters when something has gone wrong. 6s was short enough that a slow
+// network or a browser still waking up counted as a hard failure.
+const SILENT_TIMEOUT_MS = 12000;
+
+// Mirror of what's in localStorage. Storage can be unavailable outright —
+// private windows, blocked site data, a full quota — and `setItem` throws when
+// it is. That throw used to happen INSIDE Google's sign-in callback, one line
+// before the renewal got scheduled, so the renewal was never armed and the
+// session was guaranteed to end an hour later. Now storage failing costs only
+// the across-refresh convenience, not the session itself.
+let tokenMemoryFallback = null;
 
 function saveToken(token, expiresInSeconds) {
   const expiresAt = Date.now() + (expiresInSeconds * 1000) - 60000; // 60s safety buffer
-  localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify({ access_token: token, expires_at: expiresAt }));
+  const record = { access_token: token, expires_at: expiresAt };
+  tokenMemoryFallback = record;
+  try {
+    localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(record));
+  } catch (e) { /* keeps working from memory for the life of this tab */ }
 }
 function loadStoredToken() {
+  let parsed = null;
   try {
     const raw = localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed.access_token || !parsed.expires_at || parsed.expires_at <= Date.now()) return null;
-    return parsed;
-  } catch (e) { return null; }
+    if (raw) parsed = JSON.parse(raw);
+  } catch (e) { parsed = null; }
+  if (!parsed) parsed = tokenMemoryFallback;
+  if (!parsed || !parsed.access_token || !parsed.expires_at || parsed.expires_at <= Date.now()) return null;
+  return parsed;
 }
-function clearStoredToken() { localStorage.removeItem(TOKEN_STORAGE_KEY); }
+function clearStoredToken() {
+  tokenMemoryFallback = null;
+  try { localStorage.removeItem(TOKEN_STORAGE_KEY); } catch (e) { /* nothing stored to clear */ }
+}
 
-function scheduleTokenRefresh(expiresInSeconds) {
+// Milliseconds of usable life left on the stored token, 0 if there isn't one.
+// Everything that decides "is it time to renew" reads the wall clock through
+// here rather than trusting a timer to have fired when it said it would.
+function tokenLifeLeftMs() {
+  const stored = loadStoredToken();
+  return stored ? Math.max(0, stored.expires_at - Date.now()) : 0;
+}
+
+function scheduleTokenRefreshIn(delayMs) {
   if (tokenRefreshTimer) clearTimeout(tokenRefreshTimer);
-  const delayMs = Math.max((expiresInSeconds - 120) * 1000, 10000); // refresh ~2min before expiry
-  tokenRefreshTimer = setTimeout(() => { requestSilentToken(); }, delayMs);
+  tokenRefreshTimer = setTimeout(() => { tokenRefreshTimer = null; renewToken(); }, Math.max(delayMs, 5000));
+}
+function scheduleTokenRefresh(expiresInSeconds) {
+  scheduleTokenRefreshIn((expiresInSeconds * 1000) - RENEW_LEAD_MS);
 }
 
 // Attempts to get a fresh token without an interactive popup. Works when the
 // browser still has an active Google session and the user already granted
 // this app access — resolves to null (no throw) if that's not possible, so
 // callers can fall back to showing the "Sign in" button.
+// The one way a renewal ever finishes — Google's callback, Google's
+// error_callback and the safety timeout all come through here. Resolving the
+// waiting promise and dropping the de-dupe gate happen together, in one place,
+// because doing them separately is how the gate gets left standing after the
+// renewal it was guarding is over. A stuck gate is worse than no gate: every
+// later renewal short-circuits onto a promise that will never settle, and the
+// session dies with nothing able to revive it.
+function settleSilentRenew(value, stamp) {
+  if (pendingSilentResolve) { const r = pendingSilentResolve; pendingSilentResolve = null; r(value); }
+  if (stamp === undefined || stamp === silentRenewSeq) silentRenewInFlight = null;
+}
+
 function requestSilentToken() {
+  // The gate also expires on the wall clock, so that even a renewal nothing
+  // ever settles — a tab frozen by the browser mid-request is how that happens
+  // — only ever blocks the next one for as long as it could plausibly still be
+  // running.
+  if (silentRenewInFlight && (Date.now() - silentRenewStartedAt) < (SILENT_TIMEOUT_MS * 2)) {
+    return silentRenewInFlight;
+  }
   if (!tokenClient) return Promise.resolve(null);
-  return new Promise((resolve) => {
+  const stamp = ++silentRenewSeq;
+  silentRenewStartedAt = Date.now();
+  silentRenewInFlight = null;
+  pendingSilentResolve = null;
+  const promise = new Promise((resolve) => {
     pendingSilentResolve = resolve;
-    const settle = (value) => {
-      if (pendingSilentResolve) { pendingSilentResolve(value); pendingSilentResolve = null; }
-    };
     try {
       tokenClient.requestAccessToken({ prompt: '' });
-    } catch (e) { settle(null); return; }
-    setTimeout(() => settle(null), 6000); // safety timeout if the callback never fires
+    } catch (e) { settleSilentRenew(null, stamp); return; }
+    setTimeout(() => settleSilentRenew(null, stamp), SILENT_TIMEOUT_MS); // if nothing ever calls back
   });
+  // Gate on it only if it's actually still running — `requestAccessToken` can
+  // fail or answer before this line is reached, and gating on a promise that
+  // has already settled would hand the next caller a stale answer.
+  if (pendingSilentResolve) silentRenewInFlight = promise;
+  return promise;
+}
+
+// The single place a renewal happens in the background, and — this is the part
+// that was missing — the single place that re-arms the next attempt. Before
+// this, a failed renewal was the quiet end of the session: nothing rescheduled,
+// so the token ran out a couple of minutes later and the next click on anything
+// threw the user back to the sign-in screen. Now a failure backs off and tries
+// again, and keeps trying.
+async function renewToken() {
+  if (navigator.onLine === false) {
+    // No point spending an attempt, and no reason to call this a failure.
+    if (signedInUi) setAuthStatus('Offline — will reconnect on its own');
+    scheduleTokenRefreshIn(15000);
+    return false;
+  }
+  const token = await requestSilentToken();
+  if (token) {
+    renewFailureCount = 0;
+    if (!signedInUi) onSignedIn(); else setAuthStatus('Signed in');
+    return true;
+  }
+  renewFailureCount++;
+  scheduleTokenRefreshIn(Math.min(15000 * renewFailureCount, 60000));
+  // Only say anything once the token is actually gone. A renewal that fails
+  // with 4 minutes still on the clock is a non-event the user shouldn't see.
+  if (signedInUi && tokenLifeLeftMs() <= 0) setAuthStatus('Reconnecting…');
+  return false;
+}
+
+// The wall-clock backstop. A single setTimeout an hour out is not something to
+// stake a session on: a background tab gets its timers throttled, and a
+// sleeping machine doesn't run them at all, so the one renewal that mattered
+// fires late — after the token has already expired. This checks the real clock
+// every 30 seconds, and runs again the moment the tab is looked at, focused,
+// restored, or the network comes back, which is exactly when a missed renewal
+// would otherwise be discovered by signing someone out.
+function checkTokenHealth() {
+  if (!tokenClient || !signedInUi) return;
+  if (silentRenewInFlight) return;
+  if (tokenLifeLeftMs() > RENEW_LEAD_MS) return;
+  renewToken();
+}
+let tokenWakeListenersBound = false;
+function startTokenWatchdog() {
+  if (tokenWatchdogTimer) clearInterval(tokenWatchdogTimer);
+  tokenWatchdogTimer = setInterval(checkTokenHealth, WATCHDOG_INTERVAL_MS);
+  if (tokenWakeListenersBound) return;
+  tokenWakeListenersBound = true;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkTokenHealth();
+  });
+  window.addEventListener('focus', checkTokenHealth);
+  window.addEventListener('pageshow', checkTokenHealth);
+  window.addEventListener('online', () => { renewFailureCount = 0; checkTokenHealth(); });
 }
 
 // Ensures `accessToken` is set and fresh before an API call. Returns false
@@ -2035,8 +2277,23 @@ function requestSilentToken() {
 async function ensureFreshToken() {
   const stored = loadStoredToken();
   if (stored) { accessToken = stored.access_token; return true; }
-  const token = await requestSilentToken();
-  if (token) return true;
+  // Two goes, not one. A single silent attempt loses to a network blip or a
+  // browser that was asleep a second ago, and losing it used to cost the whole
+  // session — the user gets dumped back to the sign-in screen with whatever
+  // they were doing hidden behind it.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (navigator.onLine === false) break;
+    const token = await requestSilentToken();
+    if (token) { renewFailureCount = 0; return true; }
+    if (attempt === 0) await new Promise(r => setTimeout(r, 1200));
+  }
+  if (navigator.onLine === false) {
+    // Being offline is not being signed out. Hold the session, keep the app on
+    // screen, and let the watchdog pick it up when the connection returns.
+    setAuthStatus('Offline — will reconnect on its own');
+    scheduleTokenRefreshIn(10000);
+    return false;
+  }
   forceSignedOut('Your session expired — please sign in again.');
   return false;
 }
@@ -2047,7 +2304,8 @@ function onGsiLoad() {
     scope: SCOPES,
     callback: (resp) => {
       if (resp.error) {
-        if (pendingSilentResolve) { const r = pendingSilentResolve; pendingSilentResolve = null; r(null); return; }
+        if (pendingSilentResolve) { settleSilentRenew(null); return; }
+        settleSilentRenew(null);
         setAuthStatus('Sign-in failed: ' + resp.error);
         return;
       }
@@ -2055,16 +2313,33 @@ function onGsiLoad() {
       saveToken(accessToken, resp.expires_in);
       scheduleTokenRefresh(resp.expires_in);
       if (pendingSilentResolve) {
-        const r = pendingSilentResolve; pendingSilentResolve = null; r(accessToken);
-      } else {
+        settleSilentRenew(accessToken);
+      } else if (!signedInUi) {
         onSignedIn();
+      } else {
+        // A renewal that came back after its own safety timeout gave up on it.
+        // The token is good and is now saved, so take it — but don't re-run
+        // every data load underneath somebody who is mid-task.
+        renewFailureCount = 0;
+        setAuthStatus('Signed in');
       }
+    },
+    // Google reports popup-blocked / iframe-closed / network failures here and
+    // NOT through `callback`. Without this the only thing that ever noticed was
+    // the safety timeout, so every such failure cost a full timeout's wait and
+    // then looked identical to "this account has no access".
+    error_callback: (err) => {
+      if (pendingSilentResolve) { settleSilentRenew(null); return; }
+      settleSilentRenew(null);
+      setAuthStatus('Sign-in failed: ' + ((err && (err.type || err.message)) || 'unknown error'));
     }
   });
 
   const btn = document.getElementById('signin-btn');
   btn.disabled = false;
   btn.textContent = 'Sign in with Google';
+
+  startTokenWatchdog();
 
   // Restore a still-valid cached session on load (fixes "signed out on
   // every refresh"); otherwise make a silent attempt in case the browser
@@ -2111,6 +2386,8 @@ function setAuthStatus(text) {
 
 function forceSignedOut(message) {
   accessToken = null;
+  signedInUi = false;
+  renewFailureCount = 0;
   clearStoredToken();
   if (tokenRefreshTimer) { clearTimeout(tokenRefreshTimer); tokenRefreshTimer = null; }
   document.getElementById('app-content').classList.add('hidden');
@@ -2121,6 +2398,8 @@ function forceSignedOut(message) {
 }
 
 function onSignedIn() {
+  signedInUi = true;
+  renewFailureCount = 0;
   setAuthStatus('Signed in');
   document.getElementById('signin-btn').classList.add('hidden');
   document.getElementById('signout-btn').classList.remove('hidden');
@@ -2512,8 +2791,9 @@ function renderDashboardTable() {
     (!role || r['Role'] === role) &&
     (!search || (r['Name'] || '').toLowerCase().includes(search))
   );
-  // Roster-wide, so it's drawn before the filter check below — "12 of 30
-  // certified" must not change because someone typed a name into the search box.
+  // The strip follows the region and role dropdowns (it reads them itself, so
+  // it can't disagree with the table) but deliberately ignores the search box —
+  // "12 of 30 certified" must not change because someone typed a name.
   renderDashboardStats();
   const wrap = document.getElementById('dashboard-table-wrap');
   if (!filtered.length) { wrap.innerHTML = '<div class="empty-state">No matching people.</div>'; return; }
@@ -2548,14 +2828,16 @@ function renderDashboardTable() {
     html += `<td class="name-cell">${escapeHtml(r['Name'])}${countBadge}</td>`;
     html += `<td>${escapeHtml(r['Role'])}</td>`;
     html += `<td class="region-cell">${escapeHtml(r['Region'])}</td>`;
-    flagCols.forEach(c => html += `<td>${flagBadge(r[c])}</td>`);
-    certCols.forEach(c => html += `<td>${certBadge(r[c])}</td>`);
+    // Each status is also the control that sets it — see rosterToggleCell.
+    flagCols.forEach(c => html += `<td>${rosterToggleCell(r, c, 'flag')}</td>`);
+    certCols.forEach(c => html += `<td>${rosterToggleCell(r, c, 'cert')}</td>`);
     html += '</tr>';
     html += `<tr class="roster-detail-row hidden" data-row-index="${i}"><td colspan="10">` +
       `<div class="person-sessions" id="roster-sessions-${i}"></div></td></tr>`;
   });
   html += '</tbody></table>';
   wrap.innerHTML = html;
+  wireRosterToggles(wrap);
 
   // Click a person to see the recordings they've submitted, one open at a time.
   // Rendered on first open rather than up front — a full roster's worth of
@@ -2697,6 +2979,9 @@ function refreshRosterRecordingCounts() {
   if (!rosterRows.length || !submissionsCache) return;
   // Never yank an open row shut under someone who's reading it.
   if (document.querySelector('#dashboard-table-wrap .roster-row.open')) return;
+  // And never repaint a badge mid-write, or throw away a certification somebody
+  // has already armed and is about to confirm.
+  if (rosterEditInProgress()) return;
   renderDashboardTable();
 }
 
@@ -2733,21 +3018,76 @@ function flagBadge(val) {
    never trigger a read of its own, and must never say anything the table below
    it doesn't also say. Called from renderDashboardTable (so it follows the
    roster) and from renderFollowUps (so the follow-up figure lands once that
-   list has loaded, which happens a moment later). */
+   list has loaded, which happens a moment later).
+
+   It answers for a slice of the roster, not the whole thing: the region and
+   role dropdowns narrow all four figures, and the roster card splits its total
+   by role so "how many field managers are there, and how many are certified"
+   is one glance rather than a count down the table. */
 function renderDashboardStats() {
   const el = document.getElementById('dashboard-stats');
   if (!el) return;
-  if (!rosterRows.length) { el.innerHTML = ''; return; }
+  const scopeEl = document.getElementById('dashboard-stats-scope');
+  const clear = () => { el.innerHTML = ''; if (scopeEl) scopeEl.innerHTML = ''; };
+  if (!rosterRows.length) { clear(); return; }
+
+  /* The two dropdowns narrow every figure here; the name search deliberately
+     does not. A region or a role is a slice of the company somebody is asking
+     about, so "3 of 4 certified in BC2" is the number they actually want —
+     whereas typing a name is a lookup, and watching the roster total tick down
+     per keystroke tells nobody anything. The scope line says which is in force.
+
+     Read straight off the dropdowns rather than passed in, because
+     updateFollowUpCount calls this as well and two readings of the same filters
+     could drift apart. */
+  const region = document.getElementById('filter-region').value;
+  const role = document.getElementById('filter-role').value;
+  const inScope = rosterRows.filter(r =>
+    (!region || r['Region'] === region) && (!role || r['Role'] === role)
+  );
 
   const yes = (r, col) => (r[col] || '').trim().toLowerCase() === 'yes';
-  const total = rosterRows.length;
-  const trainingCert = rosterRows.filter(r => yes(r, 'Certified - Training Days')).length;
-  const onsiteCert = rosterRows.filter(r => yes(r, 'Certified - Team On-Site Days')).length;
-  // Deliberately the count of people the roster says are *ready to be trained
-  // on*, not a re-derivation of the certification rule — that rule lives in the
-  // note above this strip and in the Smartsheet, and copying it here would give
-  // it a second home to drift in.
-  const openFollowUps = followUpItems.filter(i => !isAddressed(i)).length;
+  const total = inScope.length;
+  // Nobody matches this combination. The table below already says so in words —
+  // four cards reading "0 of 0" would only say it worse.
+  if (!total) { clear(); return; }
+  const trainingCert = inScope.filter(r => yes(r, 'Certified - Training Days')).length;
+  const onsiteCert = inScope.filter(r => yes(r, 'Certified - Team On-Site Days')).length;
+
+  /* How the roster splits by role, straight off the Roster's own Role column —
+     so a role nobody has used yet appears here the day somebody is given it,
+     with no code change and no list of roles to keep in step.
+
+     Deliberately not pluralised: the count sits in its own column beside the
+     role, so each row reads as a category rather than a sentence, and this way
+     the page never has to guess the plural of a job title typed into a Sheet. */
+  const ROLE_NOT_SET = 'Role not set';
+  const roleCounts = new Map();
+  inScope.forEach(r => {
+    const key = (r['Role'] || '').trim() || ROLE_NOT_SET;
+    roleCounts.set(key, (roleCounts.get(key) || 0) + 1);
+  });
+  // Biggest group first, so the breakdown reads at a glance. People with no role
+  // on the Roster go last wherever their count would have put them — that's a
+  // gap in the sheet, not a role.
+  const roleRows = [...roleCounts.entries()].sort((a, b) => {
+    if ((a[0] === ROLE_NOT_SET) !== (b[0] === ROLE_NOT_SET)) return a[0] === ROLE_NOT_SET ? 1 : -1;
+    return b[1] - a[1] || a[0].localeCompare(b[0]);
+  });
+
+  /* A graded session has no region or role of its own — it inherits both from
+     the person it's about (item.region is already looked up that way). Someone
+     whose name isn't on the Roster has neither, so they drop out of a narrowed
+     count rather than being counted against a region they aren't in. */
+  const openFollowUps = followUpItems.filter(i => {
+    if (isAddressed(i)) return false;
+    if (region && i.region !== region) return false;
+    if (role) {
+      const person = rosterPerson(i.person);
+      if (!person || (person['Role'] || '').trim() !== role) return false;
+    }
+    return true;
+  }).length;
 
   const pct = (n) => total ? Math.round((n / total) * 100) : 0;
   const card = ({ label, value, of, sub, bar, cls }) =>
@@ -2758,11 +3098,28 @@ function renderDashboardStats() {
       (bar === undefined ? '' : `<div class="stat-card-bar"><span style="width:${bar}%"></span></div>`) +
     `</div>`;
 
+  // What the four figures cover. Named above them because two of them are now
+  // narrowable, and a number whose scope isn't stated is a number waiting to be
+  // misread.
+  if (scopeEl) {
+    const regionsInScope = new Set(inScope.map(r => (r['Region'] || '').trim()).filter(Boolean)).size;
+    const people = `${total} ${total === 1 ? 'person' : 'people'}`;
+    // Pointless once a single region is picked — it can only ever say "1 region".
+    const across = region ? '' : ` across ${regionsInScope} region${regionsInScope === 1 ? '' : 's'}`;
+    const chips = [region, role].filter(Boolean)
+      .map(c => `<span class="stat-scope-chip">${escapeHtml(c)}</span>`).join(' + ');
+    scopeEl.innerHTML = chips
+      ? `Counting ${chips} — ${people}${across}. Searching a name doesn't change these figures.`
+      : `Counting the whole roster — ${people}${across}.`;
+  }
+
   el.innerHTML = [
     card({
       label: 'People on the roster',
       value: total,
-      sub: `${[...new Set(rosterRows.map(r => (r['Region'] || '').trim()).filter(Boolean))].length} regions`
+      sub: '<div class="stat-roles">' + roleRows.map(([name, n]) =>
+        `<span class="stat-role-n">${n}</span><span class="stat-role-label">${escapeHtml(name)}</span>`
+      ).join('') + '</div>'
     }),
     card({
       label: 'Certified — Training Days',
@@ -2791,11 +3148,239 @@ function renderDashboardStats() {
   ].join('');
 }
 
+// No title= on either badge: on the Dashboard both are wrapped in the button
+// that changes them (rosterToggleCell), and an inner tooltip would shadow the
+// one that says what clicking actually does.
 function certBadge(val) {
-  const isYes = (val || '').trim().toLowerCase() === 'yes';
+  const isYes = isYesValue(val);
   return isYes
     ? `<span class="badge good">${checkIcon()}Certified</span>`
-    : `<span class="badge critical" title="Not certified">${xIcon()}Not yet</span>`;
+    : `<span class="badge critical">${xIcon()}Not yet</span>`;
+}
+
+/* ---------------- Changing a roster status from the Dashboard ----------------
+   The six status columns are editable in place: clicking a badge writes "Yes"
+   or "No" into that person's row on the Roster sheet. Decisions worth not
+   re-litigating:
+
+   - This is a HUMAN changing the Roster, which is exactly the permission a
+     passing manual grade already has (see certifyOnRoster). An AI grade still
+     never writes to the Roster, and mustn't until Phase 5.
+   - A certification arms first and takes a second click; the four training
+     steps flip on one. Getting a training step wrong is a click away from being
+     right, where certifying somebody is a sign-off and un-certifying takes one
+     away. The arm/confirm idiom is the delete button's, so it's already
+     familiar from Recent Submissions.
+   - The cell is READ BACK before the badge changes. A write that quietly
+     doesn't stick has bitten this app before (it's why the delete reads its
+     rows back), and here it would leave the Dashboard confidently showing a
+     certification the Sheet doesn't have.
+   - It never re-renders the table. A repaint would shut an expanded row and
+     throw away an armed button, so only the one badge is redrawn and the four
+     things that depend on the value are refreshed by name: the stat strip, the
+     trainee dropdown's "training not complete" marker, the out-of-order warning
+     on the grading form, and the certify preview.
+   - Turning something off writes "No", not a blank — the same reason
+     uncertifyOnRoster does. The badges read the two identically, but a written
+     "No" says somebody decided this where an empty cell reads as never filled
+     in. */
+
+// True while a cell is being written, or while a certification is armed and
+// waiting on its second click. Both are states a background refresh must not
+// repaint out from under.
+let rosterEditBusy = false;
+let armedRosterToggle = null;
+let rosterEditStatusTimer = null;
+function rosterEditInProgress() { return rosterEditBusy || !!armedRosterToggle; }
+
+function isYesValue(val) { return (val || '').toString().trim().toLowerCase() === 'yes'; }
+
+// How to name this column inside a sentence. Certification columns drop the
+// "Certified - " prefix because the sentence around them already supplies it;
+// a training step keeps its full column name, so the words match the Roster
+// header somebody would go looking for.
+function rosterColumnPhrase(column) {
+  return column.indexOf('Certified - ') === 0 ? column.replace('Certified - ', '') : column;
+}
+
+// What clicking will do, in one sentence — used for both the tooltip and the
+// screen-reader label, so they can't drift apart.
+function rosterToggleAction(name, column, kind, on) {
+  const what = rosterColumnPhrase(column);
+  const who = name || 'this person';
+  if (kind === 'cert') {
+    return on
+      ? `Remove ${who}'s ${what} certification (asks you to confirm).`
+      : `Certify ${who} for ${what} (asks you to confirm).`;
+  }
+  return on
+    ? `Mark "${what}" as Pending for ${who}.`
+    : `Mark "${what}" as Done for ${who}.`;
+}
+
+function rosterToggleCell(person, column, kind) {
+  const value = person[column];
+  const badge = kind === 'cert' ? certBadge(value) : flagBadge(value);
+  // A column the Roster doesn't actually have has nowhere to write to, so it
+  // stays a plain badge rather than offering a button that could only fail.
+  if (!rosterHeaders.includes(column)) return badge;
+  const name = person['Name'] || '';
+  const label = escapeHtml(rosterToggleAction(name, column, kind, isYesValue(value)));
+  return `<button type="button" class="badge-toggle" data-person="${escapeHtml(name)}"` +
+    ` data-column="${escapeHtml(column)}" data-kind="${kind}"` +
+    ` title="${label}" aria-label="${label}">${badge}</button>`;
+}
+
+// The live value, read out of rosterRows rather than off a data attribute, so
+// there's one source of truth for what the Roster currently says.
+function rosterValueFor(btn) {
+  const person = rosterPerson(btn.getAttribute('data-person'));
+  return person ? person[btn.getAttribute('data-column')] : '';
+}
+
+function paintRosterToggle(btn, value) {
+  const kind = btn.getAttribute('data-kind');
+  const label = rosterToggleAction(btn.getAttribute('data-person'), btn.getAttribute('data-column'), kind, isYesValue(value));
+  btn.innerHTML = kind === 'cert' ? certBadge(value) : flagBadge(value);
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+}
+
+function disarmRosterToggle() {
+  const armed = armedRosterToggle;
+  armedRosterToggle = null;
+  if (!armed) return;
+  clearTimeout(armed.timeout);
+  armed.btn.classList.remove('armed');
+  paintRosterToggle(armed.btn, rosterValueFor(armed.btn));
+}
+
+// One cell on the Roster, written and then read back. Found by header name at
+// the row number stamped on the person during loadRoster — never by position in
+// rosterRows, which one blank row in the Sheet makes wrong, and for a
+// certification column that means signing off somebody who wasn't graded.
+async function writeRosterCell(name, column, value) {
+  const person = rosterPerson(name);
+  if (!person) throw new Error(`"${name}" is no longer on the Roster. Press Refresh and try again.`);
+  const colIndex = rosterHeaders.indexOf(column);
+  if (colIndex === -1) throw new Error(`the Roster has no "${column}" column.`);
+  // An expired token is the one predictable way this fails, and it's silent
+  // from here — renew before writing rather than finding out from a 401.
+  if (!(await ensureFreshToken())) throw new Error('your Google sign-in has expired. Sign in again and retry.');
+  const cell = `${columnLetter(colIndex)}${person[ROSTER_ROW_NUMBER]}`;
+  await sheetsBatchUpdate(ROSTER_SHEET_ID, [{ range: cell, values: [[value]] }]);
+  const check = await sheetsGet(ROSTER_SHEET_ID, cell);
+  const written = String((check[0] || [])[0] || '').trim();
+  if (written.toLowerCase() !== value.toLowerCase()) {
+    throw new Error(`the write didn't stick. Cell ${cell} still reads "${written || 'blank'}". Nothing on screen was changed.`);
+  }
+  // The Sheet was just written and read back, so update the copy in memory
+  // instead of re-reading the whole Roster. loadRoster() would rebuild the
+  // trainee dropdown and re-render the table, emptying a half-filled form and
+  // shutting any row someone has open.
+  person[column] = value;
+  return person;
+}
+
+function rosterEditConfirmation(name, column, kind, turnedOn) {
+  const what = rosterColumnPhrase(column);
+  if (kind === 'cert') {
+    return turnedOn
+      ? `Saved — ${name} is now certified for ${what}.`
+      : `Saved — ${name}'s ${what} certification has been removed.`;
+  }
+  return turnedOn
+    ? `Saved — "${what}" is now Done for ${name}.`
+    : `Saved — "${what}" is now Pending for ${name}.`;
+}
+
+function showRosterEditStatus(message) {
+  const el = document.getElementById('dashboard-edit-status');
+  if (!el) return;
+  clearTimeout(rosterEditStatusTimer);
+  el.textContent = message || '';
+  if (message) rosterEditStatusTimer = setTimeout(() => { el.textContent = ''; }, 8000);
+}
+
+// The same loud shell as the failed delete and the un-certify offer, and
+// scrolled into view for the same recorded reason: the badge that failed can be
+// most of a roster below the top of the table. Plain scroll, no
+// behavior:'smooth' — smooth scrolling is a silent no-op in some browsers, and
+// a notice whose whole job is to not be missed must not ride on it.
+function showRosterEditError(message) {
+  const host = document.getElementById('dashboard-edit-error');
+  if (!host) return;
+  if (!message) { host.innerHTML = ''; return; }
+  host.innerHTML =
+    `<div class="alert-bar critical is-new" role="alert">` +
+      `<div class="alert-bar-icon">${alertIcon()}</div>` +
+      `<div class="alert-bar-body">` +
+        `<div class="alert-bar-title">That change didn't reach the Roster</div>` +
+        `<div class="alert-bar-text"></div>` +
+      `</div>` +
+    `</div>`;
+  host.querySelector('.alert-bar-text').textContent = message;
+  host.scrollIntoView({ block: 'center' });
+}
+
+function wireRosterToggles(wrap) {
+  // The table was just replaced, so anything armed is pointing at a node that
+  // no longer exists — drop it (and its timer) rather than leaving it to fire.
+  disarmRosterToggle();
+  wrap.querySelectorAll('.badge-toggle').forEach(btn => {
+    btn.addEventListener('click', async (event) => {
+      // The row underneath expands this person's sessions. A click meant for
+      // the badge must not also open the row.
+      event.stopPropagation();
+      if (btn.disabled) return;
+      const name = btn.getAttribute('data-person');
+      const column = btn.getAttribute('data-column');
+      const kind = btn.getAttribute('data-kind');
+      const turningOn = !isYesValue(rosterValueFor(btn));
+      const what = rosterColumnPhrase(column);
+
+      // First click on a certification only arms it.
+      if (kind === 'cert' && (armedRosterToggle && armedRosterToggle.btn) !== btn) {
+        disarmRosterToggle();
+        btn.classList.add('armed');
+        btn.innerHTML = `<span class="badge warning">${alertIcon()}${turningOn ? 'Certify?' : 'Remove?'}</span>`;
+        const ask = turningOn
+          ? `Click again to certify ${name} for ${what}.`
+          : `Click again to remove ${name}'s ${what} certification.`;
+        btn.title = ask;
+        btn.setAttribute('aria-label', ask);
+        armedRosterToggle = { btn, timeout: setTimeout(disarmRosterToggle, 5000) };
+        return;
+      }
+      disarmRosterToggle();
+
+      const value = turningOn ? 'Yes' : 'No';
+      rosterEditBusy = true;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="badge saving">${dashIcon()}Saving…</span>`;
+      showRosterEditError('');
+      showRosterEditStatus('');
+      try {
+        await writeRosterCell(name, column, value);
+        paintRosterToggle(btn, value);
+        showRosterEditStatus(rosterEditConfirmation(name, column, kind, turningOn));
+        // Everything else on screen that reads this value. Deliberately not a
+        // renderDashboardTable() — that would shut an expanded row.
+        renderDashboardStats();
+        populateTraineeDropdown();
+        renderPrereqGate();
+        renderCertPreview();
+      } catch (e) {
+        // Nothing was changed, so the badge goes back to what the Roster still
+        // says rather than to the value that failed to save.
+        paintRosterToggle(btn, rosterValueFor(btn));
+        showRosterEditError(`Couldn't change "${what}" for ${name} — ${e.message}`);
+      } finally {
+        btn.disabled = false;
+        rosterEditBusy = false;
+      }
+    });
+  });
 }
 function checkIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 function xIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>'; }
