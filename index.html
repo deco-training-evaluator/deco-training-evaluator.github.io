@@ -1856,7 +1856,10 @@ function renderDashboardTable() {
     const countBadge = count
       ? ` <span class="roster-count" title="${count} graded session${count === 1 ? '' : 's'} for this person. Click the row to see them.">${count} session${count === 1 ? '' : 's'}</span>`
       : '';
-    html += `<tr class="roster-row" data-row-index="${i}" title="Click to see this person's sessions">`;
+    // data-person carries the name because a row's index changes with the
+    // filters — after a re-render it's the name, not the position, that finds
+    // the row that was open (see renderDashboardKeepingOpenRow).
+    html += `<tr class="roster-row" data-row-index="${i}" data-person="${escapeHtml(r['Name'] || '')}" title="Click to see this person's sessions">`;
     html += `<td class="roster-chevron-cell"><span class="log-chevron">&#9656;</span></td>`;
     html += `<td class="name-cell">${escapeHtml(r['Name'])}${countBadge}</td>`;
     html += `<td>${escapeHtml(r['Role'])}</td>`;
@@ -1945,13 +1948,16 @@ async function renderPersonSessions(name, container) {
     const manual = s.manualGrade
       ? escapeHtml(s.manualGrade)
       : `<span class="grade-cell-muted">${s.grader === 'Did not attend' ? '—' : 'None'}</span>`;
+    const audio = audioLinkOf(s.audioLink);
     const ai = hasAi
       ? aiScoreCell(s.aiRow)
-      : `<span class="grade-cell-muted">${s.audioLink ? 'Pending…' : 'N/A'}</span>`;
+      : `<span class="grade-cell-muted">${audio ? 'Pending…' : 'N/A'}</span>`;
     const certified = hasAi ? aiCertifiedCell(s.aiRow) : '';
-    const listen = s.audioLink
-      ? `<a class="ps-listen" href="${escapeHtml(s.audioLink)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Open in Drive</a>`
-      : '';
+    // A session with no recording says so, rather than offering an "Open in
+    // Drive" link with nothing behind it.
+    const listen = audio
+      ? `<a class="ps-listen" href="${escapeHtml(audio)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Open in Drive</a>`
+      : `<span class="grade-cell-muted">No recording</span>`;
     html += `<div class="person-session${hasAi ? ' has-ai' : ''}" data-session-index="${i}">` +
       `<div class="person-session-head">` +
         (hasAi ? '<span class="log-chevron">&#9656;</span>' : '') +
@@ -1989,7 +1995,7 @@ async function renderPersonSessions(name, container) {
         box.classList.remove('hidden');
         if (!rendered) {
           rendered = true;
-          renderAiGradingResult(result, box, driveFileIdFromLink(s.audioLink));
+          renderAiGradingResult(result, box, driveFileIdFromLink(audioLinkOf(s.audioLink)));
         }
       }
     });
@@ -2008,6 +2014,28 @@ function refreshRosterRecordingCounts() {
   // Never yank an open row shut under someone who's reading it.
   if (document.querySelector('#dashboard-table-wrap .roster-row.open')) return;
   renderDashboardTable();
+}
+
+// A repaint the Dashboard can't skip. The guard above deliberately refuses to
+// re-render while a row is open, so a background refresh can't shut a row under
+// someone reading it — but a delete is the opposite case: the open row is
+// showing a session that no longer exists, and leaving it there is worse than
+// the row blinking. So repaint, then re-open the same person.
+// Matched by name rather than by row index, since the index only means anything
+// against the filters that were in effect when the row was drawn.
+function renderDashboardKeepingOpenRow() {
+  if (!rosterRows.length) return;
+  const wrap = document.getElementById('dashboard-table-wrap');
+  if (!wrap) return;
+  const openRow = wrap.querySelector('.roster-row.open');
+  const openName = openRow ? openRow.getAttribute('data-person') : '';
+  renderDashboardTable();
+  if (!openName) return;
+  const again = [...wrap.querySelectorAll('tr.roster-row')]
+    .find(el => el.getAttribute('data-person') === openName);
+  // Click rather than setting the class directly, so the row opens through the
+  // same handler that renders the person's sessions.
+  if (again) again.click();
 }
 
 function flagBadge(val) {
@@ -2550,6 +2578,17 @@ function mergeClips(entries) {
     .sort((a, b) => b.runs - a.runs)
     .slice(0, MAX_CLIPS_PER_SECTION)
     .sort((a, b) => a.seconds - b.seconds);
+}
+
+// Column G of the Grading Log holds the Drive link to the recording, and it can
+// legitimately be empty — audio is optional on the form, so a manual grade can
+// be submitted with nothing to listen to. Anything that isn't a real http link
+// (blank, whitespace, or a note someone typed into the Sheet by hand) counts as
+// "no recording" here, so it renders as such rather than as a link that opens
+// onto nothing.
+function audioLinkOf(link) {
+  const trimmed = String(link || '').trim();
+  return /^https?:\/\//i.test(trimmed) ? trimmed : '';
 }
 
 // A Drive webViewLink ("https://drive.google.com/file/d/<id>/view?...") back to
@@ -3333,7 +3372,10 @@ async function loadRecentLog() {
     let html = '<table class="log-table"><thead><tr><th></th><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Manual Grade</th><th>AI Grade</th><th>Certified</th><th>Audio</th><th></th></tr></thead><tbody>';
     body.forEach((s, i) => {
       const when = s.when ? new Date(s.when).toLocaleString() : '';
-      const audioCell = s.audioLink ? `<a href="${escapeHtml(s.audioLink)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Listen</a>` : '';
+      const audio = audioLinkOf(s.audioLink);
+      const audioCell = audio
+        ? `<a href="${escapeHtml(audio)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Listen</a>`
+        : `<span class="grade-cell-muted">None</span>`;
       const hasAi = !!parsedAi[i];
       const chevron = hasAi ? '<span class="log-chevron">&#9656;</span>' : '';
       const manualGradeCell = s.manualGrade
@@ -3341,7 +3383,7 @@ async function loadRecentLog() {
         : `<span class="grade-cell-muted">${s.grader === 'Did not attend' ? '—' : 'None'}</span>`;
       const aiGradeCell = hasAi
         ? aiScoreCell(s.aiRow)
-        : `<span class="grade-cell-muted">${s.audioLink ? 'Pending…' : 'N/A'}</span>`;
+        : `<span class="grade-cell-muted">${audio ? 'Pending…' : 'N/A'}</span>`;
       const certifiedCell = hasAi
         ? aiCertifiedCell(s.aiRow)
         : `<span class="grade-cell-muted">—</span>`;
@@ -3382,7 +3424,7 @@ async function loadRecentLog() {
             // The audio link in column G is the only place a logged row records
             // which recording it came from — pull the Drive ID back out of it so
             // this row's timestamps are clickable too, not just a fresh result's.
-            renderAiGradingResult(aiResult, document.getElementById(`log-detail-${i}`), driveFileIdFromLink(s.audioLink));
+            renderAiGradingResult(aiResult, document.getElementById(`log-detail-${i}`), driveFileIdFromLink(audioLinkOf(s.audioLink)));
             rendered = true;
           }
         }
@@ -3427,6 +3469,19 @@ async function loadRecentLog() {
           if (!wrap.querySelector('tr.log-row')) {
             wrap.innerHTML = '<div class="empty-state">No submissions yet.</div>';
           }
+          // The Dashboard's expanded rows read submissionsCache, not the sheet,
+          // so a delete here has to take the session out of that cache too —
+          // otherwise the person's row on the Dashboard goes on listing a
+          // session that isn't in the Grading Log any more. loadFollowUps()
+          // below re-reads the sheet and would rebuild the cache correctly, but
+          // it's a round trip that can be slow or fail, and its repaint is
+          // skipped outright while a roster row is open.
+          const gone = new Set(rowNumbers.map(Number));
+          if (submissionsCache) {
+            submissionsCache = submissionsCache.filter(s =>
+              !(s.rowNumbers || []).some(n => gone.has(Number(n))));
+          }
+          renderDashboardKeepingOpenRow();
           loadFollowUps(); // a deleted session must also leave the Follow-Ups list
         } catch (e) {
           if (headerRow) headerRow.classList.remove('deleting');
@@ -3705,7 +3760,7 @@ function renderFollowUps() {
         headerRow.classList.add('open');
         detailRow.classList.remove('hidden');
         if (!rendered) {
-          renderAiGradingResult(item.result, document.getElementById(`fu-detail-${i}`), driveFileIdFromLink(item.sub.audioLink));
+          renderAiGradingResult(item.result, document.getElementById(`fu-detail-${i}`), driveFileIdFromLink(audioLinkOf(item.sub.audioLink)));
           rendered = true;
         }
       }
