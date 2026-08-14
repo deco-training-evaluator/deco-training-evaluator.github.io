@@ -685,7 +685,15 @@
     border-color: color-mix(in srgb, var(--accent) 70%, transparent);
     background: color-mix(in srgb, var(--accent) 16%, transparent);
   }
-  .clip-runs { font-size: 9.5px; font-weight: 700; margin-left: 4px; opacity: 0.85; }
+  /* Words, not a "×2" badge on the chip — see clipChips() for why. This still
+     has to stay quiet: it's a note about the timestamp above it, not a second
+     piece of data competing with the score. */
+  .ai-clip-runs {
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--text-muted);
+  }
   /* More than one moment in a section: the times on their own stop being enough
      to choose between — "00:34  02:15  07:41" gives a manager nothing to pick
      from without hovering all three — so each gets its quote and they stack.
@@ -2378,19 +2386,24 @@ function clipChips(clips, interactive) {
     // printed here would sometimes be a lie. The count on its own always holds.
     const runsNote = corroborated ? ` · ${runs} of the AI's passes pointed here` : '';
     const tip = `Jump to about ${clip.at}${quote}${runsNote}`;
-    const runsBadge = corroborated
-      ? `<span class="clip-runs">&times;${escapeHtml(String(runs))}</span>`
-      : '';
     const cls = 'clip-chip' + (corroborated ? ' is-corroborated' : '') + (interactive ? '' : ' is-static');
     const chip = interactive
-      ? `<button type="button" class="${cls}" data-seconds="${escapeHtml(String(clip.seconds))}" data-at="${escapeHtml(clip.at)}" data-quote="${escapeHtml(clip.quote || '')}" title="${escapeHtml(tip)}">${escapeHtml(clip.at)}${runsBadge}</button>`
-      : `<span class="${cls}" title="${escapeHtml(tip)}">${escapeHtml(clip.at)}${runsBadge}</span>`;
-    if (!multi) return chip;
-    const brief = shortQuote(clip.quote, 5);
+      ? `<button type="button" class="${cls}" data-seconds="${escapeHtml(String(clip.seconds))}" data-at="${escapeHtml(clip.at)}" data-quote="${escapeHtml(clip.quote || '')}" title="${escapeHtml(tip)}">${escapeHtml(clip.at)}</button>`
+      : `<span class="${cls}" title="${escapeHtml(tip)}">${escapeHtml(clip.at)}</span>`;
+    // Spelled out rather than a "×2" badge on the chip. The badge was read on
+    // sight as "there are 2 timestamps here" (Jordan, 2026-08-13) — the exact
+    // opposite of what it means, since a corroborated clip is ONE moment that
+    // several passes agreed on. Any compact glyph sitting next to a number
+    // invites that reading, so the count gets words or it doesn't ship.
+    const runsLine = corroborated
+      ? `<span class="ai-clip-runs" title="${escapeHtml(runsNote.replace(/^ · /, ''))}">${escapeHtml(String(runs))} passes point here</span>`
+      : '';
+    const brief = multi ? shortQuote(clip.quote, 5) : '';
     const quoteLine = brief
       ? `<span class="ai-clip-quote" title="${escapeHtml(clip.quote || '')}">“${escapeHtml(brief)}”</span>`
       : '';
-    return `<div class="ai-clip-line">${chip}${quoteLine}</div>`;
+    if (!multi && !runsLine) return chip;
+    return `<div class="ai-clip-line">${chip}${runsLine}${quoteLine}</div>`;
   }).join('');
   return `<div class="ai-clips${multi ? ' is-multi' : ''}">
     <span class="ai-detail-label">Listen at</span>
@@ -2775,7 +2788,7 @@ function renderAiGradingResult(result, container, audioFileId) {
     anyInconsistent ? `<div class="ai-section-footnote"><span class="score-note-mark">†</span> Came up, but the 3 AI passes couldn't agree if it was scorable. Counts as 0 — worth a listen.</div>` : '',
     anyNeedsReview ? `<div class="ai-section-footnote"><strong>Double-check</strong> — the 3 AI passes disagreed by more than 2 points. Least reliable score here.</div>` : '',
     anyClips ? `<div class="ai-section-footnote"><strong>Listen at</strong> — where the AI says it heard what set that score. Approximate, and its reading of the moment can still be wrong: the point is to get you to the right part of the recording fast enough to judge for yourself.</div>` : '',
-    anyCorroborated ? `<div class="ai-section-footnote"><strong>&times;2</strong> / <strong>&times;3</strong> — how many of the AI passes landed on that same moment independently. More passes agreeing is a better bet for where to start listening; it says nothing about whether the score is right.</div>` : ''
+    anyCorroborated ? `<div class="ai-section-footnote"><strong>&ldquo;2 passes point here&rdquo;</strong> — that's <em>one</em> moment several of the AI's passes landed on independently, not several moments. Every separate moment gets its own timestamp, listed underneath each other. More passes agreeing is a better bet for where to start listening; it says nothing about whether the score is right.</div>` : ''
   ].filter(Boolean);
   const sectionFootnotes = footnoteLines.length
     ? `<div class="ai-section-footnotes">${footnoteLines.join('')}</div>`
