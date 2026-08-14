@@ -4773,7 +4773,10 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
         regionalManagerName: traineeName,
         graderName,
         date: new Date().toISOString().slice(0, 10),
-        audioFileId: fileMeta.id
+        audioFileId: fileMeta.id,
+        // Only used to size the progress estimate — a 131 MB session and a
+        // 1.4 MB clip should not be quoted the same wait.
+        audioBytes: audioFile.size
       });
     }
   } catch (err) {
@@ -4811,19 +4814,20 @@ async function driveGetFile(fileId, fields) {
 }
 
 /* ---------------------- AI grading ---------------------- */
-// The Apps Script endpoint is one blocking HTTP call that only returns once
-// all 3 consensus-grading Gemini passes finish server-side — there's no
-// real progress feed to poll, so a literal "live %" isn't available without
-// a bigger backend change (e.g. Code.gs writing progress to the sheet as it
-// goes, and this page polling that). What's implemented instead is an
-// honest *estimated* progress bar: it fills toward ~92% over a typical
-// grading duration, then creeps slowly the rest of the way if a session
-// runs long, and only snaps to 100% once the real result actually comes
-// back — paired with a running elapsed-time readout so Jordan can see it's
-// still working, not stuck. ESTIMATED_GRADING_SECONDS (3 minutes) reflects
-// that Code.gs runs 3 sequential Gemini calls per session — adjust this if
-// real observed timings turn out to run consistently faster or slower.
-const ESTIMATED_GRADING_SECONDS = 180;
+// There is still no real progress feed to poll — each Apps Script call is one
+// blocking request that only answers when it's finished — so a literal "live %"
+// would need a bigger backend change (Code.gs writing progress into the sheet
+// as it goes, and this page polling that). What's here instead is an honest
+// ESTIMATED bar that only snaps to 100% once the real result lands, paired with
+// a running elapsed readout so it's visibly working rather than stuck.
+//
+// V15 changed the shape of this in two ways. Grading is now TWO calls (send the
+// recording, then grade it), so the bar is split into phases — each owns a slice
+// so the handover always moves forward and never looks like a reset. And the
+// estimate is now derived from the FILE SIZE rather than being a flat 3 minutes,
+// because that flat number came from a 2-minute test clip and a 4h33m session is
+// a completely different job. See estimatedPhaseSeconds, which sits with the
+// grading function it serves.
 
 function formatElapsed(totalSeconds) {
   const m = Math.floor(totalSeconds / 60);
@@ -4831,20 +4835,58 @@ function formatElapsed(totalSeconds) {
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
-function estimatedProgressPercent(elapsedSeconds) {
-  if (elapsedSeconds <= ESTIMATED_GRADING_SECONDS) {
-    return (elapsedSeconds / ESTIMATED_GRADING_SECONDS) * 92;
-  }
-  // Past the estimate: creep slowly from 92% toward 97% over the next
-  // ~2.5 minutes, then hold — never claims 100% until the real result lands.
-  const overrun = elapsedSeconds - ESTIMATED_GRADING_SECONDS;
-  return Math.min(97, 92 + (overrun / 150) * 5);
+// Rough per-phase estimates, scaled off the file size, because a 2-minute clip
+// and a 4h33m session are not remotely the same job and one number can't
+// describe both. Every figure here is a GUESS until a real long session has
+// actually run — which is exactly why the bar never claims 100% before the
+// result lands and why the elapsed counter sits underneath it. The elapsed
+// counter is the honest part; the bar is the reassuring part.
+function estimatedPhaseSeconds(audioBytes) {
+  const mb = Math.max(1, (audioBytes || 0) / (1024 * 1024));
+  return {
+    upload: Math.round(Math.min(300, 10 + mb * 0.8)),
+    grade: Math.round(Math.min(600, 60 + mb * 1.4))
+  };
 }
 
-async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerName, graderName, date, audioFileId }) {
+// Apps Script kills any execution at 6 minutes. When that happens the web app
+// doesn't answer with JSON — it answers with an HTML error page, or the
+// connection simply ends — so the page would otherwise report
+// "AI grading request failed: Unexpected token '<'", which says nothing useful
+// about a recording being too long. This turns the single most likely failure
+// on a long session into a sentence that names the cause.
+function describeGradingTransportFailure(rawText, elapsedSeconds) {
+  const looksLikeHtml = /^\s*<!?\w/.test(rawText || '');
+  const nearTheWall = elapsedSeconds >= 240;   // Apps Script's wall is 360s
+  if (looksLikeHtml && nearTheWall) {
+    return 'The grading step ran past the 6-minute limit Google puts on this kind of script, so it was cut off. '
+      + 'The recording did reach the AI — it is the grading pass that ran out of time. '
+      + 'A shorter recording will go through; a fix for full-length sessions needs the three passes split across separate calls.';
+  }
+  if (looksLikeHtml) {
+    return 'The grading service answered with a web page instead of a result, which usually means the script errored out. '
+      + 'Check Apps Script > Executions for the real reason.';
+  }
+  return '';
+}
+
+async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerName, graderName, date, audioFileId, audioBytes }) {
   const statusEl = document.getElementById('aiGradingStatus');
   let progressTimer = null;
   const startedAt = Date.now();
+  const estimates = estimatedPhaseSeconds(audioBytes);
+
+  // V15: grading is two round trips now, because Apps Script's 6-minute limit
+  // is per CALL. Phase 1 gets the recording somewhere Gemini can read it,
+  // phase 2 grades it. Each phase gets its own budget, and the bar has to say
+  // which one is running or a 4-minute upload looks like a hung grade.
+  let phase = 'upload';
+  let phaseStartedAt = Date.now();
+  function setPhase(next) {
+    phase = next;
+    phaseStartedAt = Date.now();
+    renderProgress();
+  }
 
   // The grading panel is shared between the live session-type tabs, so a grade
   // started on one tab must not paint its progress or its result onto another.
@@ -4861,10 +4903,29 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
   function renderProgress() {
     if (!statusEl || !onOwnTab()) return;
     const elapsed = (Date.now() - startedAt) / 1000;
-    const pct = estimatedProgressPercent(elapsed);
-    const label = elapsed <= ESTIMATED_GRADING_SECONDS
-      ? `AI grading in progress — usually takes about ${formatElapsed(ESTIMATED_GRADING_SECONDS)} for a full session (this is an estimate, not a live server progress feed).`
-      : `Still grading — this one's taking longer than the usual ${formatElapsed(ESTIMATED_GRADING_SECONDS)}. Hang tight.`;
+    const inPhase = (Date.now() - phaseStartedAt) / 1000;
+
+    // Each phase owns a slice of the bar, so it always moves forward: the
+    // handover from uploading to grading must never look like a reset.
+    let pct;
+    let label;
+    if (phase === 'upload') {
+      pct = Math.min(28, (inPhase / estimates.upload) * 28);
+      label = `Step 1 of 2 — sending the recording to the AI. About ${formatElapsed(estimates.upload)} for a file this size (an estimate, not a live progress feed).`;
+    } else if (phase === 'processing') {
+      pct = 28 + Math.min(7, (inPhase / 60) * 7);
+      label = 'Step 1 of 2 — the AI is unpacking the recording. This can take a minute on a long session.';
+    } else {
+      const gradePct = Math.min(57, (inPhase / estimates.grade) * 57);
+      pct = 35 + gradePct;
+      label = inPhase <= estimates.grade
+        ? `Step 2 of 2 — grading. Usually about ${formatElapsed(estimates.grade)} for a recording this length (an estimate, not a live progress feed).`
+        : `Step 2 of 2 — still grading. This one is past the expected ${formatElapsed(estimates.grade)}. Hang tight.`;
+    }
+    // Past every estimate, creep instead of stalling, and never claim 100%
+    // until the real result is actually in hand.
+    pct = Math.min(97, pct);
+
     statusEl.innerHTML =
       `<div class="ai-progress-text">${escapeHtml(label)}</div>` +
       `<div class="ai-progress-bar"><div class="ai-progress-fill" style="width:${pct.toFixed(1)}%"></div></div>` +
@@ -4881,20 +4942,82 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
     progressTimer = setInterval(renderProgress, 1000);
   }
 
-  try {
+  // One place that talks to the Apps Script endpoint, so every phase gets the
+  // same non-JSON handling. Reads the body as TEXT first and parses it here:
+  // response.json() on an Apps Script error page throws "Unexpected token '<'",
+  // which tells a manager nothing at all.
+  async function callGrader(payload) {
     const response = await fetch(AI_GRADING_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids a CORS preflight against Apps Script
-      body: JSON.stringify({
-        sessionType,          // "Team On-Site Day" or "Training Day"
-        traineeName,          // Site Operator(s) being observed
-        regionalManagerName,  // RM/trainer being graded
-        graderName,           // whoever is submitting this grade
-        date,                 // "YYYY-MM-DD"
-        audioFileId           // Drive file ID from the upload that already happened
-      })
+      body: JSON.stringify(payload)
     });
-    const result = await response.json();
+    const raw = await response.text();
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      console.error('Grading endpoint returned something that is not JSON:', raw.slice(0, 2000));
+      const explained = describeGradingTransportFailure(raw, (Date.now() - phaseStartedAt) / 1000);
+      throw new Error(explained || ('The grading service sent back something unreadable (' + err.message + ').'));
+    }
+  }
+
+  try {
+    // ---- Phase 1: get the recording somewhere Gemini can read it ----------
+    // A short clip comes back as mode:'inline' having done nothing at all; a
+    // real session gets uploaded to the Files API and comes back as a URI.
+    const prepared = await callGrader({ action: 'prepareAudio', audioFileId });
+
+    // A backend older than V15 has never heard of `action`, so it reads this as
+    // a grade request with no sessionType and says so. That is a reliable
+    // signature, and it matters: this page and Code.gs are deployed by two
+    // completely separate steps (a git push vs. a manual paste and New Version),
+    // so there WILL be a window where the page is new and the script is old.
+    // Falling back keeps short clips grading exactly as they did in V14 instead
+    // of breaking grading outright for whoever is mid-session at the time.
+    const backendIsPreV15 = !prepared.ok && /sessionType must be/.test(prepared.error || '');
+    if (backendIsPreV15) {
+      console.warn('Grading backend is older than V15 — falling back to the single-call flow. Long recordings will not work until Code.gs is redeployed.');
+    } else if (!prepared.ok) {
+      throw new Error(prepared.error || 'Getting the recording to the AI failed.');
+    }
+
+    let geminiFileUri = prepared.geminiFileUri || '';
+    const audioMimeType = prepared.mimeType || '';
+
+    // A big upload can still be PROCESSING when prepareAudio hits its own
+    // 6-minute limit. Asking again costs nothing — it's a metadata read, not a
+    // grading call — and every ask gets a fresh budget on the server.
+    if (!backendIsPreV15 && prepared.mode === 'file' && prepared.state !== 'ACTIVE') {
+      setPhase('processing');
+      let active = false;
+      for (let attempt = 1; attempt <= 24 && !active; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        const checked = await callGrader({ action: 'checkAudio', geminiFileName: prepared.geminiFileName });
+        if (!checked.ok) throw new Error(checked.error || 'Checking on the upload failed.');
+        if (checked.state === 'ACTIVE') {
+          active = true;
+          if (checked.geminiFileUri) geminiFileUri = checked.geminiFileUri;
+        }
+      }
+      if (!active) {
+        throw new Error('The AI has not finished unpacking this recording. Nothing was lost and nothing was graded — '
+          + 'the recording is safely in Drive. Try submitting it again in a few minutes.');
+      }
+    }
+
+    // ---- Phase 2: grade it -----------------------------------------------
+    setPhase('grade');
+    const result = await callGrader({
+      sessionType,          // "Team On-Site Day" or "Training Day"
+      traineeName,          // Site Operator(s) being observed
+      regionalManagerName,  // RM/trainer being graded
+      graderName,           // whoever is submitting this grade
+      date,                 // "YYYY-MM-DD"
+      audioFileId,          // still required — column G's Drive link is built from it
+      geminiFileUri,        // empty for a short clip, which keeps the old inline path
+      audioMimeType
+    });
     stopProgress();
     finish();
 
