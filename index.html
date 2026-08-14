@@ -1976,7 +1976,7 @@ async function renderPersonSessions(name, container) {
     const ai = hasAi
       ? aiScoreCell(s.aiRow)
       : `<span class="grade-cell-muted">${audio ? 'Pending…' : 'N/A'}</span>`;
-    const certified = hasAi ? aiCertifiedCell(s.aiRow) : '';
+    const certified = certifiedCellFor(s, hasAi) || '';
     // A session with no recording says so, rather than offering an "Open in
     // Drive" link with nothing behind it.
     const listen = audio
@@ -2132,6 +2132,20 @@ function populateTraineeDropdown() {
    weak session doesn't revoke a certification somebody already holds, and
    that's a call for a manager, not for a form. */
 
+/* The grader's "every section scored 6 or higher" tick, recorded on the manual
+   row at column W. It has to be written down, not just acted on: the log only
+   ever stored the total, so a grade that certified somebody and a grade that
+   missed on one section looked identical afterwards, and the Certified column
+   had nothing to show but a dash (see manualCertifiedCell).
+
+   W, not one of the free columns before it: Code.gs owns A-S, and T/U/V are the
+   follow-up state. */
+const MANUAL_SECTIONS_IDX = 22;                    // W
+const MANUAL_SECTIONS_HEADER = 'All Sections 6+';
+// Every range that reads or clears a Grading Log row has to reach this far, or
+// a delete leaves a stray Yes behind and a read comes back without the tick.
+const GRADING_LOG_LAST_COLUMN = 'W';
+
 // Both halves of the Smartsheet formula, or nothing.
 function manualGradeCertifies(sessionType, rawGrade, everySectionPassed) {
   if (!everySectionPassed) return false;
@@ -2202,17 +2216,20 @@ function manualGradeTotal(text) {
   return m ? Number(m[1]) : null;
 }
 
-// Was this submission's manual grade at or above the bar for its session type?
-// Note what this can't know: the "every section scored 6 or higher" tick isn't
-// stored on the row, so a passing total here didn't necessarily certify
-// anybody. That's exactly why a deleted one only ever asks (see
+// Could this submission's manual grade have certified the person — both halves
+// of the rule, as far as the row can say? A recorded "No" on the sections tick
+// settles it: that grade certified nobody, so it can't be what put the Yes on
+// the Roster, and it can't be what's holding one up either. A blank is an older
+// row from before the tick was recorded — genuinely unknown, and still worth
+// asking about, which is why a deleted grade only ever asks (see
 // offerUncertifyAfterDelete) instead of writing.
 function submissionPassedManually(sub) {
   const type = (sub && sub.type) || 'Training Day';
   const threshold = SESSION_PASS_THRESHOLD[type];
   if (!threshold || !SESSION_CERT_COLUMN[type]) return false;
   const total = manualGradeTotal(sub && sub.manualGrade);
-  return total !== null && total >= threshold;
+  if (total === null || total < threshold) return false;
+  return ((sub && sub.sectionsAllPass) || '').trim().toLowerCase() !== 'no';
 }
 
 // Says what pressing Submit will do to the Dashboard, while the score is still
@@ -2328,7 +2345,22 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
       document.getElementById('g-feedback').value,
       audioLink
     ];
-    await sheetsAppend(GRADING_SHEET_ID, 'A1:G1', row);
+    // Pad out to W and record the sections tick there — blank when there's no
+    // manual grade for it to qualify, since an audio-only submission has no
+    // sections anybody vouched for.
+    while (row.length < MANUAL_SECTIONS_IDX) row.push('');
+    row.push(rawGradeVal !== '' ? (everySectionPassed ? 'Yes' : 'No') : '');
+    await sheetsAppend(GRADING_SHEET_ID, `A1:${GRADING_LOG_LAST_COLUMN}1`, row);
+    // Label that column, the way the follow-up columns label themselves, so the
+    // Sheet doesn't grow a column of unexplained Yes/No. Cosmetic, and its own
+    // try/catch: the grade is already saved, and a missing header must never be
+    // reported as a failed submission.
+    try {
+      await sheetsBatchUpdate(GRADING_SHEET_ID,
+        [{ range: `${GRADING_LOG_LAST_COLUMN}1`, values: [[MANUAL_SECTIONS_HEADER]] }]);
+    } catch (headerErr) {
+      console.warn('Could not label the ' + MANUAL_SECTIONS_HEADER + ' column:', headerErr);
+    }
 
     // The grade is saved at this point. Certifying is a second, separate write
     // to a different Sheet, so it's kept out of the try/catch above: if the
@@ -3338,6 +3370,43 @@ function aiScoreCell(aiRow) {
 // long "Cannot determine..." note from before Code.gs guaranteed Yes/No).
 // The raw value is kept as a title= tooltip so nothing is hidden, just not
 // left ambiguous in the column itself.
+/* What the Certified column says about a session a person graded rather than
+   the AI. Same rule as everywhere else — the total at or above the bar AND
+   every section at 6 or better — so it can't tell someone a session certified
+   when the app itself wouldn't have certified on it.
+
+   Three answers, not two. A row submitted before the sections tick was
+   recorded genuinely can't answer the second half, and saying "Yes" off the
+   total alone is exactly the shortcut the certification rule exists to
+   prevent. So it reports the half it knows and points at the Dashboard for the
+   rest. Returns null when there's nothing to judge at all. */
+function manualCertifiedCell(sub) {
+  const threshold = SESSION_PASS_THRESHOLD[(sub && sub.type) || 'Training Day'];
+  const total = manualGradeTotal(sub && sub.manualGrade);
+  if (!threshold || total === null) return null;
+  const grade = escapeHtml(sub.manualGrade);
+  const tick = (sub.sectionsAllPass || '').trim().toLowerCase();
+  if (total < threshold) {
+    return `<span class="badge critical" title="Manual grade: ${grade} is under the ${threshold} needed to certify.">${xIcon()}No</span>`;
+  }
+  if (tick === 'yes') {
+    return `<span class="badge good" title="Manual grade: ${grade}, and the grader confirmed every section reached 6.">${checkIcon()}Yes</span>`;
+  }
+  if (tick === 'no') {
+    return `<span class="badge critical" title="Manual grade: ${grade} clears the ${threshold} bar, but the grader didn't confirm every section reached 6.">${xIcon()}No</span>`;
+  }
+  return `<span class="badge pending" title="Manual grade: ${grade} clears the ${threshold} bar. Whether every section reached 6 wasn't recorded on this row, so this can't say certified on its own — the Dashboard has the person's actual status.">${dashIcon()}Bar met</span>`;
+}
+
+// One rule for the Certified column, used by Recent Submissions and by the
+// expanded roster row so the two can't disagree. A graded session shows the
+// AI's verdict — that's the column's job during calibration; a session with no
+// recording shows what the person who graded it decided. Null when neither
+// exists, and each caller says its own version of "nothing here".
+function certifiedCellFor(sub, hasAi) {
+  return hasAi ? aiCertifiedCell(sub.aiRow) : manualCertifiedCell(sub);
+}
+
 function aiCertifiedCell(aiRow) {
   const certified = aiRow[10];
   const isYes = (certified || '').trim().toLowerCase() === 'yes';
@@ -3459,9 +3528,10 @@ function showUncertifyOffer(name, sessionType) {
 // that knows how the sheet's rows map onto sessions, rather than two copies
 // that can drift apart.
 async function fetchSubmissions() {
-  // A1:V — A-S is everything Code.gs writes; T-V is the follow-up state this
-  // page adds afterwards (see FOLLOWUP_* below).
-  const rows = await sheetsGet(GRADING_SHEET_ID, 'A1:V1000');
+  // Out to W: A-S is everything Code.gs writes, T-V is the follow-up state this
+  // page adds afterwards (see FOLLOWUP_* below), and W is the sections tick off
+  // the manual row (MANUAL_SECTIONS_IDX).
+  const rows = await sheetsGet(GRADING_SHEET_ID, `A1:${GRADING_LOG_LAST_COLUMN}1000`);
   if (rows.length <= 1) return [];
   // Track each row's real sheet row number (1-indexed, header is row 1) before
   // filtering out blanks, so a delete can clear the exact right row(s) later.
@@ -3494,6 +3564,10 @@ async function fetchSubmissions() {
       when: base[0], trainee: base[1], type: base[2],
       grader: (manual && manual.r[3]) || (ai && ai.r[3]) || '',
       manualGrade: manual ? manual.r[4] : '',
+      // The other half of the certification rule, off the manual row. Blank on
+      // anything submitted before it started being recorded — which is a real
+      // "unknown", not a "no" (see manualCertifiedCell).
+      sectionsAllPass: manual ? (manual.r[MANUAL_SECTIONS_IDX] || '') : '',
       audioLink: base[6],
       aiRow: ai ? ai.r : null,
       // Follow-up state is written onto the AI row, because that's the row
@@ -3508,6 +3582,7 @@ async function fetchSubmissions() {
       order: rowNumber, rowNumbers: [rowNumber],
       when: r[0], trainee: r[1], type: r[2], grader: r[3],
       manualGrade: r[7] === 'AI' ? '' : r[4],
+      sectionsAllPass: r[7] === 'AI' ? '' : (r[MANUAL_SECTIONS_IDX] || ''),
       audioLink: r[6],
       aiRow: r[7] === 'AI' ? r : null,
       aiRowNumber: r[7] === 'AI' ? rowNumber : null
@@ -3556,9 +3631,8 @@ async function loadRecentLog() {
       const aiGradeCell = hasAi
         ? aiScoreCell(s.aiRow)
         : `<span class="grade-cell-muted">${audio ? 'Pending…' : 'N/A'}</span>`;
-      const certifiedCell = hasAi
-        ? aiCertifiedCell(s.aiRow)
-        : `<span class="grade-cell-muted">—</span>`;
+      const certifiedCell = certifiedCellFor(s, hasAi)
+        || `<span class="grade-cell-muted">—</span>`;
       const rowsAttr = s.rowNumbers.join(',');
       const deleteCell = `<td class="log-delete-cell">` +
         `<button type="button" class="log-delete-btn" data-row-index="${i}" data-sheet-rows="${rowsAttr}" title="Delete this submission">${trashIcon()}<span class="log-delete-label">Delete</span></button>` +
@@ -3647,9 +3721,10 @@ async function loadRecentLog() {
             throw new Error('this row has no Sheet row recorded against it, so there is nothing to clear. Refresh and try again.');
           }
           for (const rowNumber of rowNumbers) {
-            // A:V, not A:S — a deleted session must take its follow-up state
-            // (columns T-V) with it, or the Follow-Ups tab keeps a ghost row.
-            await sheetsClearRange(GRADING_SHEET_ID, `A${rowNumber}:V${rowNumber}`);
+            // Out to W, not A:S — a deleted session must take its follow-up
+            // state (T-V) and its sections tick (W) with it, or the Follow-Ups
+            // tab keeps a ghost row and the Sheet keeps an orphaned Yes.
+            await sheetsClearRange(GRADING_SHEET_ID, `A${rowNumber}:${GRADING_LOG_LAST_COLUMN}${rowNumber}`);
           }
 
           // Read the rows back and confirm they're actually empty before taking
@@ -3659,7 +3734,7 @@ async function loadRecentLog() {
           // take, the session stays put and says so.
           const stillThere = [];
           for (const rowNumber of rowNumbers) {
-            const check = await sheetsGet(GRADING_SHEET_ID, `A${rowNumber}:V${rowNumber}`);
+            const check = await sheetsGet(GRADING_SHEET_ID, `A${rowNumber}:${GRADING_LOG_LAST_COLUMN}${rowNumber}`);
             if (check.length && check[0].some(c => String(c || '').trim() !== '')) stillThere.push(rowNumber);
           }
           if (stillThere.length) {
