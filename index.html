@@ -699,35 +699,88 @@
   #grade-status.ok { color: var(--good); }
   #grade-status.err { color: var(--critical); }
   .empty-state { color: var(--text-muted); font-size: 13px; padding: 40px 24px; text-align: center; line-height: 1.6; }
-  /* A delete that didn't work has to be readable, not a label that flashes by. */
-  .log-delete-error {
-    color: var(--critical); font-size: 13px; line-height: 1.5; margin: 0 0 12px;
-    padding: 12px 16px; border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--critical) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--critical) 35%, transparent);
+  /* ---- Attention bars ----
+     Two things pop up above Recent Submissions that must not be scrolled past:
+     a delete that didn't actually go through, and a certification left standing
+     on the Roster after the grade behind it was deleted (see
+     offerUncertifyAfterDelete — an offer, not an action, because the app can't
+     know where a "Yes" came from). Both were quiet tinted strips carrying the
+     same visual weight as a hint under a form field, and the un-certify offer
+     was being missed outright. They now share one loud shell: a solid colour
+     edge down the left, an icon, a headline in the tone's own colour, full-size
+     buttons, and a lifted shadow — so the bar reads as an interruption rather
+     than as commentary.
+
+     All of that is in the RESTING state on purpose. The entrance animation
+     below is decoration only, on the same rule as the scroll-into-view: a
+     notice whose whole job is to not be missed must never depend on motion that
+     might not run. */
+  .alert-bar {
+    --tone: var(--warning);
+    position: relative;
+    display: flex; align-items: flex-start; gap: 14px;
+    margin: 0 0 16px;
+    padding: 16px 18px;
+    border: 2px solid color-mix(in srgb, var(--tone) 50%, transparent);
+    border-left: 7px solid var(--tone);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--tone) 14%, var(--surface-1));
+    box-shadow: var(--shadow-pop);
+    color: var(--text-primary);
+    font-size: 13.5px; line-height: 1.55;
   }
-  /* A deleted grade can leave a certification behind on the Roster. This bar is
-     the offer to take it back down — an offer, not an action, because the app
-     can't know where a "Yes" came from (see offerUncertifyAfterDelete). */
-  .log-cert-notice {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    color: var(--text-primary); font-size: 13px; line-height: 1.55; margin: 0 0 12px;
-    padding: 14px 16px; border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--warning) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
-    box-shadow: var(--shadow-sm);
+  .alert-bar.critical { --tone: var(--critical); }
+  .alert-bar.done     { --tone: var(--good); }
+  .alert-bar-icon {
+    flex: 0 0 auto;
+    width: 34px; height: 34px;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    color: var(--tone);
+    background: color-mix(in srgb, var(--tone) 20%, var(--surface-1));
+    border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
   }
-  .log-cert-notice.done {
-    background: color-mix(in srgb, var(--good) 12%, transparent);
-    border-color: color-mix(in srgb, var(--good) 35%, transparent);
+  .alert-bar-icon svg { width: 19px; height: 19px; display: block; }
+  .alert-bar-body { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+  /* The tone at full strength is only 4.1:1 on its own tinted background, and
+     15.5px bold doesn't qualify as large text — so the headline is pulled a
+     little toward the page's text colour. That darkens it on light, lightens it
+     on dark, and clears 5.5:1 either way while still reading as the tone. */
+  .alert-bar-title {
+    font-family: var(--font-display);
+    font-size: 15.5px; font-weight: 700; line-height: 1.3;
+    color: color-mix(in srgb, var(--tone) 78%, var(--text-primary));
   }
-  .log-cert-notice .notice-text { flex: 1 1 260px; }
-  .log-cert-notice .notice-err { flex: 1 1 100%; color: var(--critical); }
-  .log-cert-notice .notice-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .log-cert-notice .btn { padding: 7px 14px; font-size: 12px; white-space: nowrap; }
-  /* Declining the offer is the quieter of the two answers, and should look it. */
-  .log-cert-notice .btn.ghost {
-    background: transparent; color: var(--text-secondary); border: 1px solid var(--border);
+  .alert-bar .notice-err { color: var(--critical); font-weight: 600; }
+  .alert-bar .notice-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+  /* Full-size buttons now, not the shrunken ones this bar used to carry — but
+     the hierarchy between them stays exactly as it was. The bar asks a question
+     the app genuinely can't answer for you, so neither answer gets promoted to
+     a primary orange button: the loudness belongs to the notice, not to one of
+     its two options. Declining is still the quieter answer, and looks it. */
+  .alert-bar .btn { padding: 9px 18px; font-size: 13px; white-space: nowrap; }
+  .alert-bar .btn.ghost {
+    background: transparent; color: var(--text-secondary); border: 1px solid var(--border-strong);
+  }
+  .alert-bar .btn.ghost:hover:not(:disabled) { color: var(--text-primary); background: var(--surface-1); }
+  /* The arrival pulse rides on a pseudo-element so it never fights the resting
+     shadow. Twice and then it stops — a bar that pulses forever is just noise. */
+  .alert-bar::after {
+    content: ''; position: absolute; inset: -2px -2px -2px -7px;
+    border-radius: inherit; pointer-events: none;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .alert-bar.is-new { animation: alert-bar-in 280ms var(--ease) both; }
+    .alert-bar.is-new::after { animation: alert-bar-pulse 1.15s ease-out 2; }
+  }
+  @keyframes alert-bar-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: none; }
+  }
+  @keyframes alert-bar-pulse {
+    0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone) 55%, transparent); }
+    70%  { box-shadow: 0 0 0 14px color-mix(in srgb, var(--tone) 0%, transparent); }
+    100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone) 0%, transparent); }
   }
   /* First screen anyone sees, and the only one shown to someone who isn't signed
      in yet — so it's treated as a front door rather than a placeholder. */
@@ -860,52 +913,176 @@
     overflow-wrap: break-word;
   }
   .ai-result-box h4 { margin: 0 0 18px; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
-  /* The numbers at the top of a result are the summary of the whole card, so
-     they're drawn as a proper stat strip — raised, divided, evenly spaced —
-     rather than a row of labelled text runs. */
-  .ai-summary-row {
-    display: flex;
-    align-items: stretch;
-    gap: 0;
-    flex-wrap: wrap;
-    margin-bottom: 20px;
-    padding: 18px 4px;
+  /* The verdict hero — the headline of a result card, replacing the old
+     left-aligned two-cell stat strip (2026-08-14). A 46px score and a 12px
+     badge sitting in the top-left corner of a very long card read as a data
+     point rather than as the outcome, so the answer is now centred, oversized
+     and tinted by the result. Sizing is container-relative because the same
+     card also renders inside the narrower expanded rows of Recent Submissions
+     and the Dashboard. */
+  .ai-verdict {
+    position: relative;
+    container-type: inline-size;
+    margin-bottom: 22px;
+    padding: 26px 22px 22px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     background: var(--surface-1);
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--shadow-md);
+    text-align: center;
+    overflow: hidden;
   }
-  .ai-stat {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    justify-content: space-between;
-    flex: 1 1 auto;
-    padding: 0 22px;
-    border-left: 1px solid var(--gridline);
+  /* A cap in the outcome's own colour, so the result still announces itself
+     when the hero is only half on screen. */
+  .ai-verdict::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 4px;
+    background: var(--verdict-color);
   }
-  .ai-stat:first-child { border-left: none; }
-  .ai-stat-label {
+  .ai-verdict.is-pass    { --verdict-color: var(--good); }
+  .ai-verdict.is-fail    { --verdict-color: var(--critical); }
+  .ai-verdict.is-unknown { --verdict-color: var(--pending); }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .ai-verdict {
+      background-image: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 110px);
+    }
+  }
+  .ai-verdict-eyebrow {
+    display: block;
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.09em;
+    letter-spacing: 0.14em;
     color: var(--text-muted);
   }
-  .ai-stat-value { font-size: 20px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
-  /* The total score is the headline number of the whole result, so it gets a
-     display-sized treatment; the "/ 110" stays small so the score reads first. */
-  .ai-stat-value.ai-stat-score {
-    font-size: 46px;
+  .ai-verdict-score {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 12px;
     line-height: 1;
-    letter-spacing: -0.03em;
+  }
+  .ai-verdict-number {
+    font-size: clamp(56px, 13cqi, 92px);
+    font-weight: 800;
+    line-height: 0.92;
+    letter-spacing: -0.045em;
+    color: var(--verdict-color);
+    font-variant-numeric: tabular-nums;
+  }
+  .ai-verdict-max {
+    font-size: clamp(18px, 4cqi, 26px);
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: -0.01em;
+  }
+  .ai-verdict-pct {
+    margin-top: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+  .ai-verdict-badge { margin-top: 16px; }
+  .ai-verdict-badge .badge {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    padding: 9px 20px;
+    gap: 8px;
+    border-width: 1.5px;
+  }
+  .ai-verdict-badge .badge svg { width: 15px; height: 15px; }
+  /* Where the score landed against the pass mark, as one glance. The tick is
+     the bar; the fill is the score. */
+  .ai-verdict-meter {
+    position: relative;
+    height: 10px;
+    max-width: 440px;
+    margin: 22px auto 32px;
+    border-radius: 999px;
+    /* --gridline rather than --sunken: the empty part of the track has to stay
+       visible against the card behind it, and in dark mode --sunken is almost
+       exactly the card's own colour. */
+    background: var(--gridline);
+    border: 1px solid var(--border);
+  }
+  .ai-verdict-meter-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    border-radius: 999px;
+    background: var(--verdict-color);
+  }
+  .ai-verdict-meter-mark {
+    position: absolute;
+    top: -6px;
+    bottom: -6px;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 2px;
+    background: var(--text-primary);
+  }
+  .ai-verdict-meter-label {
+    position: absolute;
+    top: 15px;
+    transform: translateX(-50%);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-secondary);
     white-space: nowrap;
   }
-  .ai-stat-score .ai-score-max {
-    font-size: 20px;
-    font-weight: 600;
+  .ai-verdict-facts {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+  }
+  .ai-verdict-fact {
+    flex: 1 1 200px;
+    max-width: 300px;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--gridline);
+    background: var(--sunken);
+  }
+  .ai-verdict-fact-value {
+    display: block;
+    font-size: 30px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.025em;
+    font-variant-numeric: tabular-nums;
+  }
+  .ai-verdict-fact.is-bad  .ai-verdict-fact-value { color: var(--critical); }
+  .ai-verdict-fact.is-good .ai-verdict-fact-value { color: var(--good); }
+  .ai-verdict-fact-label {
+    display: block;
+    margin-top: 6px;
+    font-size: 11.5px;
+    font-weight: 700;
+    line-height: 1.35;
     color: var(--text-secondary);
-    letter-spacing: 0;
+  }
+  .ai-verdict-fact-note {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text-muted);
+  }
+  .ai-verdict-rule {
+    margin: 16px auto 0;
+    max-width: 520px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--text-muted);
   }
   .ai-section-list {
     margin: 0 0 18px;
@@ -2551,6 +2728,7 @@ function certBadge(val) {
 function checkIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 function xIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>'; }
 function dashIcon() { return '<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="currentColor"/></svg>'; }
+function alertIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M10 2.6 18.4 17.2H1.6L10 2.6Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M10 8.1v3.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="14.5" r="1.05" fill="currentColor"/></svg>'; }
 function trashIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M4 6h12M8 6V4.5A1.5 1.5 0 0 1 9.5 3h1A1.5 1.5 0 0 1 12 4.5V6M6 6l.6 9.2A1.5 1.5 0 0 0 8.1 16.6h3.8a1.5 1.5 0 0 0 1.5-1.4L14 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 function escapeHtml(s) { return (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -3533,6 +3711,116 @@ function correctionsBlock(result, interactive) {
   </div>`;
 }
 
+/* ---------------------- The verdict hero ----------------------
+   Built 2026-08-14 on Jordan's ask: the old header was a small "0 / 110" and a
+   12px badge, left-aligned above a very long card, and it read as a data point
+   rather than as the outcome. It also left three things for the reader to work
+   out on their own — what percentage that score is, how far off the pass mark
+   it landed, and how many sections came in under 6.
+
+   Two rules this must keep:
+   - **The badge stays the AI's own `certified` value, never re-derived here.**
+     Certification is a two-part rule (total at or above the bar AND every
+     section at 6 or higher), so a score that clears the bar can still be a No.
+     Recomputing a verdict from the total would eventually contradict the grade
+     it's printed under. Everything else in the hero is arithmetic on numbers
+     already shown further down the same card.
+   - **Sections under 6 are split, not flattened.** A section that scored 4 is a
+     performance problem; a section nothing in the recording covered counts as 0
+     for the same arithmetic but is an audio-only blind spot. Same split the
+     Follow-Ups tab makes, for the same reason — the two need different actions.
+*/
+function verdictHero(result, maxPossible) {
+  const rawTotal = Number(result.total_score);
+  const total = (result.total_score !== undefined && result.total_score !== null && !Number.isNaN(rawTotal))
+    ? rawTotal : 0;
+  const max = Number(maxPossible) || 0;
+  const threshold = SESSION_PASS_THRESHOLD[result.session_type];
+  const state = result.certified === 'Yes' ? 'is-pass'
+    : result.certified === 'No' ? 'is-fail'
+    : 'is-unknown';
+
+  // Same classification as followUpReasons() — keep the two in step, or the
+  // count here and the reasons on the Follow-Ups tab will disagree about the
+  // same session.
+  let scoredLow = 0, notHeard = 0, sectionCount = 0;
+  Object.values(result.sections || {}).forEach(val => {
+    sectionCount++;
+    const noScore = val.score === null || val.score === undefined ||
+      val.evidence_basis === 'insufficient_evidence' || val.evidence_basis === 'inconsistent_across_runs';
+    if (noScore) notHeard++;
+    else if (Number(val.score) < SECTION_PASS_MARK) scoredLow++;
+  });
+  const under = scoredLow + notHeard;
+
+  const facts = [];
+  if (threshold) {
+    const gap = threshold - total;
+    if (gap > 0) {
+      facts.push({
+        value: String(gap),
+        label: `point${gap === 1 ? '' : 's'} short of the ${threshold} needed to pass`,
+        cls: 'is-bad'
+      });
+    } else if (gap === 0) {
+      facts.push({ value: 'Met', label: `exactly on the ${threshold} pass mark`, cls: 'is-good' });
+    } else {
+      facts.push({
+        value: `+${-gap}`,
+        label: `point${-gap === 1 ? '' : 's'} clear of the ${threshold} pass mark`,
+        cls: 'is-good'
+      });
+    }
+  }
+  if (sectionCount) {
+    let note;
+    if (!under) note = `every section is at ${SECTION_PASS_MARK} or higher`;
+    else if (scoredLow && notHeard) note = `${scoredLow} scored low · ${notHeard} never came up on the recording (counts as 0)`;
+    else if (scoredLow) note = `scored under ${SECTION_PASS_MARK}`;
+    else note = `never came up on the recording — counts as 0`;
+    facts.push({
+      value: String(under),
+      label: `of ${sectionCount} sections came in under ${SECTION_PASS_MARK}`,
+      note,
+      cls: under ? 'is-bad' : 'is-good'
+    });
+  }
+
+  const factsBlock = facts.length
+    ? `<div class="ai-verdict-facts">${facts.map(f => `<div class="ai-verdict-fact ${f.cls}">
+        <span class="ai-verdict-fact-value">${escapeHtml(f.value)}</span>
+        <span class="ai-verdict-fact-label">${escapeHtml(f.label)}</span>
+        ${f.note ? `<span class="ai-verdict-fact-note">${escapeHtml(f.note)}</span>` : ''}
+      </div>`).join('')}</div>`
+    : '';
+
+  // The bar is only drawn when there's a scale to draw it against; a percentage
+  // or a pass tick invented from a missing max would be worse than no bar.
+  let meter = '';
+  if (max) {
+    const fill = Math.max(0, Math.min(100, (total / max) * 100));
+    const mark = threshold ? Math.max(0, Math.min(100, (threshold / max) * 100)) : null;
+    meter = `<div class="ai-verdict-meter" role="img" aria-label="Scored ${total} out of ${max}${threshold ? `, pass mark ${threshold}` : ''}">
+      <span class="ai-verdict-meter-fill" style="width:${fill.toFixed(2)}%"></span>
+      ${mark === null ? '' : `<span class="ai-verdict-meter-mark" style="left:${mark.toFixed(2)}%"></span>
+      <span class="ai-verdict-meter-label" style="left:${mark.toFixed(2)}%">Pass ${escapeHtml(String(threshold))}</span>`}
+    </div>`;
+  }
+
+  return `<div class="ai-verdict ${state}">
+    <span class="ai-verdict-eyebrow">AI grading result</span>
+    <div class="ai-verdict-score">
+      <span class="ai-verdict-number">${escapeHtml(String(total))}</span>
+      ${max ? `<span class="ai-verdict-max">/ ${escapeHtml(String(max))}</span>` : ''}
+    </div>
+    ${max ? `<div class="ai-verdict-pct">${Math.round((total / max) * 100)}% overall</div>` : ''}
+    <div class="ai-verdict-badge">${certifiedBadge(result.certified)}</div>
+    ${meter}
+    ${factsBlock}
+    <p class="ai-verdict-rule">${threshold ? `Certified needs <strong>${escapeHtml(String(threshold))} or more overall</strong> and <strong>every section at ${SECTION_PASS_MARK} or higher</strong> — so a total over the bar can still come back not certified. ` : ''}This is the AI's read of the recording. It's here to inform your grade, not to replace it.</p>
+  </div>`;
+}
+
 // audioFileId is the Drive ID of the session recording, when it's known — it
 // turns each section's cited timestamps into clickable jump points. Optional
 // on purpose: results graded before evidence timestamps existed, and rows with
@@ -3663,17 +3951,7 @@ function renderAiGradingResult(result, container, audioFileId) {
     : '';
 
   container.innerHTML = `
-    <h4>AI Grading Result</h4>
-    <div class="ai-summary-row">
-      <div class="ai-stat">
-        <span class="ai-stat-label">Total score</span>
-        <span class="ai-stat-value ai-stat-score">${escapeHtml(String((result.total_score !== undefined && result.total_score !== null && !Number.isNaN(Number(result.total_score))) ? result.total_score : 0))}${maxPossible ? `<span class="ai-score-max"> / ${escapeHtml(String(maxPossible))}</span>` : ''}</span>
-      </div>
-      <div class="ai-stat">
-        <span class="ai-stat-label">Certified</span>
-        <span class="ai-stat-value">${certifiedBadge(result.certified)}</span>
-      </div>
-    </div>
+    ${verdictHero(result, maxPossible)}
     ${audioBlock}
     <div class="ai-section-list">${sectionItems}</div>
     ${sectionFootnotes}
@@ -3892,7 +4170,9 @@ function aiCertifiedCell(aiRow) {
 
 // A failed delete used to say so only on the button, for three seconds, with no
 // reason attached — so a delete that didn't stick looked like one that did.
-// This puts the reason above the list, where it stays until the next attempt.
+// This puts the reason above the list, where it stays until the next attempt,
+// in the same loud shell as the un-certify offer and scrolled into view: the
+// delete button can be a long way down the list from the top of it.
 function showLogDeleteError(message) {
   const wrap = document.getElementById('recent-log-wrap');
   if (!wrap) return;
@@ -3901,10 +4181,18 @@ function showLogDeleteError(message) {
   if (!bar) {
     bar = document.createElement('div');
     bar.id = 'log-delete-error';
-    bar.className = 'log-delete-error';
+    bar.className = 'alert-bar critical is-new';
+    bar.setAttribute('role', 'alert');
+    bar.innerHTML =
+      `<div class="alert-bar-icon">${alertIcon()}</div>` +
+      `<div class="alert-bar-body">` +
+        `<div class="alert-bar-title">That delete didn't go through</div>` +
+        `<div class="alert-bar-text"></div>` +
+      `</div>`;
     wrap.prepend(bar);
+    bar.scrollIntoView({ block: 'center' });
   }
-  bar.textContent = message;
+  bar.querySelector('.alert-bar-text').textContent = message;
 }
 
 /* ------- A deleted grade can leave a certification behind -------
@@ -3971,7 +4259,7 @@ function offerUncertifyAfterDelete(sub) {
   showUncertifyOffer((person && person['Name']) || name, type);
 }
 
-function showUncertifyOffer(name, sessionType, scrollIntoView = true) {
+function showUncertifyOffer(name, sessionType, announce = true) {
   const wrap = document.getElementById('recent-log-wrap');
   if (!wrap) return;
   // Remembered outside the DOM so a re-render can put it back (restoreUncertifyOffer).
@@ -3979,10 +4267,28 @@ function showUncertifyOffer(name, sessionType, scrollIntoView = true) {
 
   const bar = document.createElement('div');
   bar.id = 'log-cert-notice';
-  bar.className = 'log-cert-notice';
+  // is-new / role="alert" only on a fresh offer: a Refresh or a finished AI
+  // grade re-draws this bar, and re-pulsing (or re-announcing to a screen
+  // reader) on every render would turn the notice into wallpaper.
+  bar.className = 'alert-bar' + (announce ? ' is-new' : '');
+  if (announce) bar.setAttribute('role', 'alert');
+
+  const icon = document.createElement('div');
+  icon.className = 'alert-bar-icon';
+  icon.innerHTML = alertIcon();
+
+  const body = document.createElement('div');
+  body.className = 'alert-bar-body';
+
+  // The headline names the thing that's wrong and where it's wrong, because the
+  // stale badge is on the Dashboard tab and this bar isn't — someone glancing at
+  // it needs to know it's about a different screen before they read a word more.
+  const title = document.createElement('div');
+  title.className = 'alert-bar-title';
+  title.textContent = 'Action needed — the Dashboard still says certified';
 
   const text = document.createElement('div');
-  text.className = 'notice-text';
+  text.className = 'alert-bar-text';
   text.innerHTML = `<strong>${escapeHtml(name)}</strong> is still marked certified for ` +
     `${escapeHtml(sessionType)} on the Dashboard, and that was the last passing grade on file. ` +
     `Deleting a grade doesn't change the Dashboard on its own — the tick lives on the Roster. ` +
@@ -4011,6 +4317,8 @@ function showUncertifyOffer(name, sessionType, scrollIntoView = true) {
       await uncertifyOnRoster(name, sessionType);
       pendingUncertify = null;
       bar.classList.add('done');
+      icon.innerHTML = checkIcon();
+      title.textContent = 'Certification removed';
       text.innerHTML = `<strong>${escapeHtml(name)}</strong> is no longer certified for ` +
         `${escapeHtml(sessionType)} on the Dashboard.`;
       actions.remove();
@@ -4037,16 +4345,19 @@ function showUncertifyOffer(name, sessionType, scrollIntoView = true) {
 
   actions.appendChild(btn);
   actions.appendChild(dismiss);
-  bar.appendChild(text);
-  bar.appendChild(err);
-  bar.appendChild(actions);
+  body.appendChild(title);
+  body.appendChild(text);
+  body.appendChild(err);
+  body.appendChild(actions);
+  bar.appendChild(icon);
+  bar.appendChild(body);
   wrap.prepend(bar);
   // The stale badge is on a different tab from the delete button, so the moment
   // this appears is the only moment it's guaranteed to be looked at. Plain
   // scroll, not behavior: 'smooth' — smooth scrolling is a silent no-op in some
   // browsers, and a notice that exists so it can't be missed must not depend on
   // an animation that might not run.
-  if (scrollIntoView) bar.scrollIntoView({ block: 'center' });
+  if (announce) bar.scrollIntoView({ block: 'center' });
 }
 
 // Reads the whole Grading Log and merges it into one submission per session.
