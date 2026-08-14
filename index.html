@@ -459,6 +459,13 @@
   #grade-status.ok { color: var(--good); }
   #grade-status.err { color: var(--critical); }
   .empty-state { color: var(--text-muted); font-size: 13px; padding: 24px; text-align: center; }
+  /* A delete that didn't work has to be readable, not a label that flashes by. */
+  .log-delete-error {
+    color: var(--critical); font-size: 13px; line-height: 1.5; margin: 0 0 12px;
+    padding: 10px 14px; border-radius: 8px;
+    background: color-mix(in srgb, var(--critical) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--critical) 35%, transparent);
+  }
   .signed-out-lock { text-align: center; padding: 56px 24px 48px; color: var(--text-secondary); }
   .signed-out-lock .lock-icon { width: 56px; height: 56px; opacity: 0.9; margin-bottom: 18px; }
   .signed-out-lock .lock-title { margin: 0 0 10px; font-size: 15px; }
@@ -3281,6 +3288,23 @@ function aiCertifiedCell(aiRow) {
     : `<span class="badge critical" title="${escapeHtml(raw)}">${xIcon()}No</span>`;
 }
 
+// A failed delete used to say so only on the button, for three seconds, with no
+// reason attached — so a delete that didn't stick looked like one that did.
+// This puts the reason above the list, where it stays until the next attempt.
+function showLogDeleteError(message) {
+  const wrap = document.getElementById('recent-log-wrap');
+  if (!wrap) return;
+  let bar = document.getElementById('log-delete-error');
+  if (!message) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'log-delete-error';
+    bar.className = 'log-delete-error';
+    wrap.prepend(bar);
+  }
+  bar.textContent = message;
+}
+
 // Reads the whole Grading Log and merges it into one submission per session.
 // Shared by Recent Submissions (which then filters to the active tab's session
 // type) and by Follow-Ups (which looks across every session type) — one place
@@ -3458,12 +3482,38 @@ async function loadRecentLog() {
         const headerRow = wrap.querySelector(`tr.log-row[data-row-index="${rowIndex}"]`);
         const detailRow = wrap.querySelector(`tr.log-detail-row[data-row-index="${rowIndex}"]`);
         if (headerRow) headerRow.classList.add('deleting');
+        showLogDeleteError('');
         try {
+          // An expired token is the one predictable way a delete can fail, and
+          // it's silent from here — renew before writing rather than finding out
+          // from a 401.
+          if (!(await ensureFreshToken())) {
+            throw new Error('your Google sign-in has expired. Sign in again and retry.');
+          }
+          if (!rowNumbers.length) {
+            throw new Error('this row has no Sheet row recorded against it, so there is nothing to clear. Refresh and try again.');
+          }
           for (const rowNumber of rowNumbers) {
             // A:V, not A:S — a deleted session must take its follow-up state
             // (columns T-V) with it, or the Follow-Ups tab keeps a ghost row.
             await sheetsClearRange(GRADING_SHEET_ID, `A${rowNumber}:V${rowNumber}`);
           }
+
+          // Read the rows back and confirm they're actually empty before taking
+          // the session off the screen. A delete that quietly doesn't stick is
+          // worse than one that fails loudly: the row vanishes here, comes back
+          // on the next load, and nothing anywhere says why. If the clear didn't
+          // take, the session stays put and says so.
+          const stillThere = [];
+          for (const rowNumber of rowNumbers) {
+            const check = await sheetsGet(GRADING_SHEET_ID, `A${rowNumber}:V${rowNumber}`);
+            if (check.length && check[0].some(c => String(c || '').trim() !== '')) stillThere.push(rowNumber);
+          }
+          if (stillThere.length) {
+            throw new Error(`the Grading Log still has data in row ${stillThere.join(' and ')} after clearing it. ` +
+              `Nothing was removed. Open the Grading Log Sheet and check whether that row is protected or locked.`);
+          }
+
           if (detailRow) detailRow.remove();
           if (headerRow) headerRow.remove();
           if (!wrap.querySelector('tr.log-row')) {
@@ -3489,6 +3539,9 @@ async function loadRecentLog() {
           btn.classList.remove('armed');
           btn.querySelector('.log-delete-label').textContent = 'Delete failed';
           setTimeout(() => { btn.querySelector('.log-delete-label').textContent = 'Delete'; }, 3000);
+          // The label on the button reverts after a few seconds and only ever
+          // says "failed" — the reason goes somewhere it can be read.
+          showLogDeleteError('Could not delete that submission — ' + e.message);
           console.error(e);
         }
       });
