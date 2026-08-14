@@ -4682,6 +4682,14 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     if (audioFile) {
       fileMeta = await driveCreateFileMetadata(audioFile.name, AUDIO_FOLDER_ID);
       await driveUploadContent(fileMeta.id, audioFile);
+      // The placeholder above is created EMPTY and the bytes arrive as a second
+      // request, so Drive can still be answering "0 bytes" for a moment after a
+      // big upload lands. prepareAudio picks inline-vs-Files-API purely from the
+      // size Drive gives it, and nothing downstream can tell a not-yet-settled
+      // 131 MB session apart from a genuinely short clip — that is exactly how
+      // the first real session came back "over the 14 MB limit" after uploading
+      // fine. Wait for Drive's own number to agree with what we just sent.
+      await driveWaitForSize(fileMeta.id, audioFile.size);
       const fileInfo = await driveGetFile(fileMeta.id, 'webViewLink');
       audioLink = fileInfo.webViewLink || '';
     }
@@ -4812,6 +4820,29 @@ async function driveGetFile(fileId, fields) {
   if (!res.ok) throw new Error('Drive get file failed: ' + res.status);
   return res.json();
 }
+// Blocks until Drive reports at least the number of bytes we uploaded, because
+// the size it reports immediately after a large upload can still be the empty
+// placeholder's. Returns the last size seen rather than throwing: the grade row
+// is already saved by the time this runs, the recording really is in Drive, and
+// a slow-to-settle Drive must never be reported as a failed submission. The
+// guard in gradeSessionWithAI is what actually stops a misread file being sent
+// off to be graded, so this only has to make that case rare, not impossible.
+async function driveWaitForSize(fileId, expectedBytes, attempts = 10) {
+  if (!expectedBytes) return 0;
+  let seen = 0;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const info = await driveGetFile(fileId, 'size');
+      seen = Number(info.size || 0);
+      if (seen >= expectedBytes) return seen;
+    } catch (err) {
+      console.warn('Could not read the uploaded size back from Drive:', err);
+    }
+    if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+  console.warn('Drive still reports ' + seen + ' bytes for a ' + expectedBytes + '-byte upload.');
+  return seen;
+}
 
 /* ---------------------- AI grading ---------------------- */
 // There is still no real progress feed to poll — each Apps Script call is one
@@ -4868,6 +4899,28 @@ function describeGradingTransportFailure(rawText, elapsedSeconds) {
       + 'Check Apps Script > Executions for the real reason.';
   }
   return '';
+}
+
+// Mirrors GEMINI_INLINE_MAX_AUDIO_BYTES in Code.gs. This copy exists ONLY to
+// catch a size disagreement before a grading round trip that cannot succeed —
+// the backend is still the one that enforces the limit. If that constant moves,
+// move this one too; a stale copy here makes the guard below fire late or early,
+// it does not change what actually gets graded.
+const INLINE_AUDIO_LIMIT_BYTES = 14 * 1024 * 1024;
+// Five tries, five seconds apart. Drive normally settles on the first ask; this
+// is sized to ride out a slow one, not to wait out a genuine failure.
+const PREPARE_AUDIO_ATTEMPTS = 5;
+
+// True when prepareAudio decided "short clip, send it inline" for a recording
+// this page knows is bigger than that limit. The two can only disagree when
+// Drive answered before the upload had settled (see driveWaitForSize), and
+// continuing from there sends a grading request with no file reference, which
+// fails on the size instead. Deliberately conservative: with no audioBytes to
+// compare against, or against a pre-V15 backend, it reports nothing wrong and
+// lets the old behaviour stand.
+function sizeLooksUnsettled(prepared, audioBytes) {
+  if (!audioBytes || prepared.mode !== 'inline') return false;
+  return audioBytes > INLINE_AUDIO_LIMIT_BYTES;
 }
 
 async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerName, graderName, date, audioFileId, audioBytes }) {
@@ -4966,20 +5019,42 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
     // ---- Phase 1: get the recording somewhere Gemini can read it ----------
     // A short clip comes back as mode:'inline' having done nothing at all; a
     // real session gets uploaded to the Files API and comes back as a URI.
-    const prepared = await callGrader({ action: 'prepareAudio', audioFileId });
+    // Asked in a loop because Drive can report a just-uploaded file as 0 bytes
+    // for a moment, and prepareAudio picks its path purely from that number. A
+    // retry is genuinely free when it comes back inline — that answer is a size
+    // check with nothing uploaded and no tokens spent — so the only cost of
+    // asking again is the wait, and the alternative is a grading request that
+    // cannot succeed.
+    let prepared = null;
+    let backendIsPreV15 = false;
+    for (let attempt = 1; attempt <= PREPARE_AUDIO_ATTEMPTS; attempt++) {
+      prepared = await callGrader({ action: 'prepareAudio', audioFileId });
 
-    // A backend older than V15 has never heard of `action`, so it reads this as
-    // a grade request with no sessionType and says so. That is a reliable
-    // signature, and it matters: this page and Code.gs are deployed by two
-    // completely separate steps (a git push vs. a manual paste and New Version),
-    // so there WILL be a window where the page is new and the script is old.
-    // Falling back keeps short clips grading exactly as they did in V14 instead
-    // of breaking grading outright for whoever is mid-session at the time.
-    const backendIsPreV15 = !prepared.ok && /sessionType must be/.test(prepared.error || '');
-    if (backendIsPreV15) {
-      console.warn('Grading backend is older than V15 — falling back to the single-call flow. Long recordings will not work until Code.gs is redeployed.');
-    } else if (!prepared.ok) {
-      throw new Error(prepared.error || 'Getting the recording to the AI failed.');
+      // A backend older than V15 has never heard of `action`, so it reads this as
+      // a grade request with no sessionType and says so. That is a reliable
+      // signature, and it matters: this page and Code.gs are deployed by two
+      // completely separate steps (a git push vs. a manual paste and New Version),
+      // so there WILL be a window where the page is new and the script is old.
+      // Falling back keeps short clips grading exactly as they did in V14 instead
+      // of breaking grading outright for whoever is mid-session at the time.
+      backendIsPreV15 = !prepared.ok && /sessionType must be/.test(prepared.error || '');
+      if (backendIsPreV15) {
+        console.warn('Grading backend is older than V15 — falling back to the single-call flow. Long recordings will not work until Code.gs is redeployed.');
+        break;
+      }
+      if (!prepared.ok) throw new Error(prepared.error || 'Getting the recording to the AI failed.');
+
+      if (!sizeLooksUnsettled(prepared, audioBytes)) break;
+
+      console.warn('prepareAudio read ' + (prepared.sizeBytes || 0) + ' bytes for a ' + audioBytes
+        + '-byte recording — Drive has not caught up yet. Retrying (' + attempt + '/' + PREPARE_AUDIO_ATTEMPTS + ').');
+      if (attempt === PREPARE_AUDIO_ATTEMPTS) {
+        throw new Error('The recording is safely in Drive and the grade row is saved, but Drive kept reporting it as '
+          + Math.round((prepared.sizeBytes || 0) / (1024 * 1024)) + ' MB instead of '
+          + Math.round(audioBytes / (1024 * 1024)) + ' MB, so the AI could not pick it up. '
+          + 'Nothing was lost — try grading this session again in a few minutes.');
+      }
+      await new Promise(resolve => setTimeout(resolve, 5000));
     }
 
     let geminiFileUri = prepared.geminiFileUri || '';
