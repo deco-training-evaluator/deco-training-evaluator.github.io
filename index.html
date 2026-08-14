@@ -751,7 +751,15 @@
     font-size: 15.5px; font-weight: 700; line-height: 1.3;
     color: color-mix(in srgb, var(--tone) 78%, var(--text-primary));
   }
-  .alert-bar .notice-err { color: var(--critical); font-weight: 600; }
+  /* Pulled toward the page's text colour for the same measured reason as the
+     headline above: full-strength --critical on a warning-tinted bar is only
+     4.04:1 at 13.5px, which fails AA. The mix darkens on light and lightens on
+     dark and clears 4.5:1 either way, while still reading as red. Don't "clean
+     this up" back to var(--critical). */
+  .alert-bar .notice-err {
+    color: color-mix(in srgb, var(--critical) 78%, var(--text-primary));
+    font-weight: 600;
+  }
   .alert-bar .notice-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
   /* Full-size buttons now, not the shrunken ones this bar used to carry — but
      the hierarchy between them stays exactly as it was. The bar asks a question
@@ -781,6 +789,35 @@
     0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone) 55%, transparent); }
     70%  { box-shadow: 0 0 0 14px color-mix(in srgb, var(--tone) 0%, transparent); }
     100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone) 0%, transparent); }
+  }
+  /* The third of these bars lives inside the grading form rather than above a
+     list (see renderPrereqGate), so it loses the bottom margin the other two
+     need and sits tight under the field it's about. */
+  .alert-bar.inline-gate { margin: 12px 0 0; }
+  .alert-bar-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+  .alert-bar-list li { color: var(--text-primary); font-weight: 600; }
+  .alert-bar-list .badge { margin-left: 6px; vertical-align: 1px; }
+  /* The override tick lives INSIDE the bar, framed as a control, so overriding
+     reads as a deliberate answer to the warning rather than as a checkbox
+     somebody happened to leave on further down the form. */
+  .alert-bar .check-row {
+    margin-top: 2px;
+    padding: 9px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+    background: color-mix(in srgb, var(--tone) 10%, var(--surface-1));
+    color: var(--text-primary);
+    font-size: 13px; font-weight: 600;
+    align-items: center;
+  }
+  .alert-bar .check-row:hover { background: color-mix(in srgb, var(--tone) 18%, var(--surface-1)); }
+  /* A ticked override is acknowledged, not resolved. It keeps the warning tone
+     and keeps saying the session is out of order — it only loses the lift, so
+     the form stops reading as blocked. Deliberately not turned green: nothing
+     about the training path got fixed by ticking a box. */
+  .alert-bar.acknowledged {
+    box-shadow: var(--shadow-sm);
+    background: color-mix(in srgb, var(--tone) 8%, var(--surface-1));
   }
   /* First screen anyone sees, and the only one shown to someone who isn't signed
      in yet — so it's treated as a front door rather than a placeholder. */
@@ -1757,6 +1794,11 @@
             <select id="g-trainee" required>
               <option value="">Select a person…</option>
             </select>
+            <!-- Filled by renderPrereqGate() when the person picked still has
+                 training steps showing Pending on the Dashboard. Sits directly
+                 under the picker on purpose: it's about the choice made in the
+                 field immediately above it. -->
+            <div id="g-prereq-gate"></div>
           </div>
           <div class="field">
             <label for="g-grader">Grader (your name)</label>
@@ -2303,6 +2345,10 @@ function applySessionTypeToForm(liveTab) {
   // in the box must be re-read against the new bar rather than keep the old
   // tab's verdict on screen.
   renderCertPreview();
+  // Prerequisites are per session type, so the dropdown's markers and the
+  // warning both have to be re-evaluated against the tab now in front.
+  if (rosterRows.length) populateTraineeDropdown();
+  renderPrereqGate();
 }
 
 function resetGradingPanel() {
@@ -2310,6 +2356,9 @@ function resetGradingPanel() {
   form.reset();
   ['g-grade', 'g-feedback', 'g-grader', 'g-all-sections-pass'].forEach(id => { document.getElementById(id).disabled = false; });
   renderCertPreview();
+  prereqOverride = null;
+  prereqBlockedSubmit = false;
+  renderPrereqGate();
   const statusEl = document.getElementById('grade-status');
   statusEl.textContent = '';
   statusEl.className = '';
@@ -2405,6 +2454,9 @@ async function loadRoster() {
     populateFilterOptions();
     populateTraineeDropdown();
     renderDashboardTable();
+    // A Refresh after someone ticks a step on the Roster should take the warning
+    // away without the person having to be re-picked.
+    renderPrereqGate();
   } catch (e) {
     wrap.innerHTML = '<div class="empty-state">Could not load roster: ' + e.message + '</div>';
   }
@@ -2435,6 +2487,22 @@ document.getElementById('filter-role').addEventListener('change', renderDashboar
 document.getElementById('filter-search').addEventListener('input', renderDashboardTable);
 document.getElementById('refresh-dashboard-btn').addEventListener('click', () => { loadRoster().then(loadFollowUps); loadRecentLog(); });
 
+/* Short header labels keep all 9 Dashboard columns fitting in one view (no
+   horizontal scroll); the full column name is still on hover via title=.
+
+   Module-level rather than local to renderDashboardTable because the
+   out-of-order warning on the grading form names steps from this same map — so
+   "D1 Training" in the warning is word-for-word the column header somebody is
+   being sent to go look at. Two copies of these labels would drift. */
+const ROSTER_SHORT_LABELS = {
+  'Day 1 - Meeting Attended': 'Meeting',
+  'Day 1 - Training Watched': 'D1 Training',
+  'Day 2 - Ops/District Manager Training': 'D2 Training',
+  'Team On-Site Day Completed': 'TOSD',
+  'Certified - Team On-Site Days': 'TOSD Cert',
+  'Certified - Training Days': 'Training Cert'
+};
+
 function renderDashboardTable() {
   const region = document.getElementById('filter-region').value;
   const role = document.getElementById('filter-role').value;
@@ -2452,16 +2520,7 @@ function renderDashboardTable() {
 
   const flagCols = ['Day 1 - Meeting Attended','Day 1 - Training Watched','Day 2 - Ops/District Manager Training','Team On-Site Day Completed'];
   const certCols = ['Certified - Team On-Site Days','Certified - Training Days'];
-  // Short header labels keep all 9 columns fitting in one view (no horizontal
-  // scroll); the full column name is still available on hover via title=.
-  const shortLabels = {
-    'Day 1 - Meeting Attended': 'Meeting',
-    'Day 1 - Training Watched': 'D1 Training',
-    'Day 2 - Ops/District Manager Training': 'D2 Training',
-    'Team On-Site Day Completed': 'TOSD',
-    'Certified - Team On-Site Days': 'TOSD Cert',
-    'Certified - Training Days': 'Training Cert'
-  };
+  const shortLabels = ROSTER_SHORT_LABELS;
 
   let html = '<table>';
   html += '<colgroup><col style="width:3%"><col style="width:14%"><col style="width:10%"><col style="width:9%">'
@@ -2748,8 +2807,20 @@ function escapeHtml(s) { return (s || '').toString().replace(/[&<>"']/g, c => ({
 /* ---------------------- Grading form ---------------------- */
 function populateTraineeDropdown() {
   const sel = document.getElementById('g-trainee');
+  // Preserved because this runs again on a Refresh and on a tab switch — a
+  // half-filled form shouldn't lose the person already picked. A name that has
+  // since left the Roster just falls back to the empty option.
+  const keep = sel.value;
   sel.innerHTML = '<option value="">Select a person…</option>' +
-    rosterRows.map(r => `<option value="${escapeHtml(r['Name'])}">${escapeHtml(r['Name'])} — ${escapeHtml(r['Role'])}</option>`).join('');
+    rosterRows.map(r => {
+      // Flagged in the list as well as in the warning underneath it, so the
+      // mistake can be avoided before it's made rather than only caught after.
+      const notReady = missingPrerequisites(r['Name'], currentSessionType).length
+        ? ' · training not complete'
+        : '';
+      return `<option value="${escapeHtml(r['Name'])}">${escapeHtml(r['Name'])} — ${escapeHtml(r['Role'])}${notReady}</option>`;
+    }).join('');
+  sel.value = keep;
 }
 
 // "Did not attend" — manual grading (Grade/Feedback) is optional and should
@@ -2936,11 +3007,181 @@ function renderCertPreview() {
   el.classList.remove('hidden');
 }
 
+/* ---------------- Grading somebody who isn't ready yet ----------------
+   The Roster tracks a certification path in order: attend the Day 1 meeting,
+   watch the Day 1 training, do the Day 2 ops/District Manager training. Only
+   after those does it make sense to grade someone delivering a Training Day or
+   being observed on a Team On-Site Day — a recording taken before them is being
+   scored against a rubric the person hasn't been trained on, and the resulting
+   low score says more about the sequence than about them.
+
+   So a person with steps still Pending raises a warning, and Submit stops until
+   it's overridden. It is a *warning with an override*, not a hard block: the
+   Roster is maintained by hand and can lag reality, and somebody who genuinely
+   needs a session graded out of order shouldn't have to go and edit a Sheet
+   first to be allowed to.
+
+   Deliberately inline and BEFORE submit, not a dialog after it — the same call
+   renderCertPreview makes. Something that shouldn't be uploaded at all is best
+   caught while the form is still being filled in, not confirmed away in a popup
+   once the audio is already sitting in Drive and the AI call has been paid for. */
+
+/* Which roster steps have to be ticked before a session of this type is worth
+   grading. Both live session types share the same three.
+
+   Deliberately NOT in this list: "Team On-Site Day Completed". That column is
+   ticked once the day has happened, so requiring it would warn on every genuine
+   first Team On-Site Day upload — the recording IS that day. Same reasoning for
+   the two Certified columns: nobody is certified before the session that
+   certifies them, so requiring one would block the entire roster.
+
+   The four preview session types have no entry here, so the gate is inert on
+   them by construction rather than by a special case. */
+const SESSION_PREREQUISITES = {
+  'Training Day': [
+    'Day 1 - Meeting Attended',
+    'Day 1 - Training Watched',
+    'Day 2 - Ops/District Manager Training'
+  ],
+  'Team On-Site Day': [
+    'Day 1 - Meeting Attended',
+    'Day 1 - Training Watched',
+    'Day 2 - Ops/District Manager Training'
+  ]
+};
+
+/* The steps this person still has Pending for this session type.
+
+   Two cases return nothing rather than everything, both for the same reason —
+   a warning the app can't actually stand behind is worse than none:
+     - a name that isn't on the Roster: the app has no idea where they stand, and
+       inventing three missing steps for somebody it can't find is a warning
+       about nothing;
+     - a required column the Roster doesn't have: renaming a column would
+       otherwise flag every single person, with no tick anywhere that could
+       clear it. */
+function missingPrerequisites(name, sessionType) {
+  const required = SESSION_PREREQUISITES[sessionType];
+  const person = required && rosterPerson(name);
+  if (!person) return [];
+  return required
+    .filter(col => rosterHeaders.includes(col))
+    .filter(col => (person[col] || '').trim().toLowerCase() !== 'yes')
+    .map(col => ({ column: col, label: ROSTER_SHORT_LABELS[col] || col }));
+}
+
+/* The override, scoped to the person AND the session type it was granted for.
+   Held here rather than read off the checkbox because the checkbox is re-drawn
+   constantly: ticking "grade anyway" for one person on a Team On-Site Day must
+   not quietly carry over to the next person picked, or to the other tab. Any
+   change to either one re-draws the gate, which drops an override that no longer
+   applies. */
+let prereqOverride = null;         // { name, sessionType } or null
+// Set when a Submit was actually stopped, so the bar can say so itself instead
+// of leaving the reason in a status line at the far end of the form.
+let prereqBlockedSubmit = false;
+
+function prereqOverrideActive(name, sessionType) {
+  return !!prereqOverride &&
+    prereqOverride.sessionType === sessionType &&
+    prereqOverride.name.trim().toLowerCase() === (name || '').trim().toLowerCase();
+}
+
+// Is this submission allowed through? True when there's nothing Pending, or when
+// the override was ticked for this exact person and session type.
+function prereqsClearFor(name, sessionType) {
+  return !missingPrerequisites(name, sessionType).length || prereqOverrideActive(name, sessionType);
+}
+
+/* Draw (or clear) the warning under the trainee picker. `alarm` is set only when
+   a Submit was actually stopped: it announces to screen readers, pulses, and
+   scrolls the bar into view — the button is at the bottom of the form and the
+   bar at the top, so on a short window the thing explaining the refusal can be
+   off screen. The scroll is deliberately plain, with no `behavior: 'smooth'`,
+   for the reason recorded on the un-certify offer: smooth scrolling is a silent
+   no-op in some browsers, and a notice whose whole job is to be seen must not
+   ride on it. */
+function renderPrereqGate({ alarm = false } = {}) {
+  const el = document.getElementById('g-prereq-gate');
+  if (!el) return;
+  const name = document.getElementById('g-trainee').value.trim();
+  const sessionType = currentSessionType;
+  // An override belonging to a different person or tab is stale by definition.
+  if (prereqOverride && !prereqOverrideActive(name, sessionType)) {
+    prereqOverride = null;
+    prereqBlockedSubmit = false;
+  }
+  const missing = missingPrerequisites(name, sessionType);
+  if (!missing.length) {
+    prereqOverride = null;
+    prereqBlockedSubmit = false;
+    el.innerHTML = '';
+    return;
+  }
+
+  const overridden = prereqOverrideActive(name, sessionType);
+  // The Roster's spelling, not whatever the dropdown happens to hold — this bar
+  // is about a specific row on the Dashboard, so it should read the way that row
+  // reads.
+  const person = rosterPerson(name);
+  const who = escapeHtml((person && person['Name']) || name);
+  // Pulse on arrival, but not on the re-draw that ticking the override triggers —
+  // a bar that re-pulses every time it's touched becomes wallpaper.
+  const existed = !!document.getElementById('g-prereq-bar');
+
+  const steps = missing
+    .map(m => `<li>${escapeHtml(m.label)}<span class="badge pending">${dashIcon()}Pending</span></li>`)
+    .join('');
+  const stepCount = `${missing.length} step${missing.length === 1 ? '' : 's'}`;
+
+  const title = overridden
+    ? 'Overridden — grading this one out of order'
+    : `${who} isn't ready for a ${escapeHtml(sessionType)} yet`;
+  const explain = overridden
+    ? `This session will upload and grade as normal. It doesn't change the Dashboard — ` +
+      `ticking this marks nothing as done.`
+    : `The path runs Meeting &rarr; D1 Training &rarr; D2 Training before a ` +
+      `${escapeHtml(sessionType)}, so a recording from now would be scored against a rubric ` +
+      `${who} hasn't been trained on yet. Tick below if you mean to grade it anyway.`;
+
+  el.innerHTML =
+    `<div class="alert-bar inline-gate${overridden ? ' acknowledged' : ''}` +
+      `${(alarm || !existed) && !overridden ? ' is-new' : ''}" id="g-prereq-bar">` +
+      `<div class="alert-bar-icon">${overridden ? checkIcon() : alertIcon()}</div>` +
+      `<div class="alert-bar-body">` +
+        `<div class="alert-bar-title">${title}</div>` +
+        `<div class="alert-bar-text"><strong>${stepCount}</strong> still showing Pending on the Dashboard:</div>` +
+        `<ul class="alert-bar-list">${steps}</ul>` +
+        `<div class="alert-bar-text">${explain}</div>` +
+        (prereqBlockedSubmit && !overridden
+          ? `<div class="notice-err">Submit stopped — tick the box below to grade anyway, or pick someone else.</div>`
+          : '') +
+        `<label class="check-row" for="g-prereq-override">` +
+          `<input type="checkbox" id="g-prereq-override"${overridden ? ' checked' : ''}>` +
+          `Upload and grade ${who} anyway` +
+        `</label>` +
+      `</div>` +
+    `</div>`;
+
+  el.querySelector('#g-prereq-override').addEventListener('change', (e) => {
+    prereqOverride = e.target.checked ? { name, sessionType } : null;
+    prereqBlockedSubmit = false;
+    renderPrereqGate();
+  });
+
+  if (alarm && !overridden) {
+    const bar = document.getElementById('g-prereq-bar');
+    bar.setAttribute('role', 'alert');
+    bar.scrollIntoView({ block: 'center' });
+  }
+}
+
 ['g-trainee', 'g-grade', 'g-all-sections-pass'].forEach(id => {
   const el = document.getElementById(id);
   el.addEventListener('input', renderCertPreview);
   el.addEventListener('change', renderCertPreview);
 });
+document.getElementById('g-trainee').addEventListener('change', () => renderPrereqGate());
 
 document.getElementById('grading-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -2957,6 +3198,22 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
   const rawGradeVal = document.getElementById('g-grade').value.trim();
   // Read before the form is reset further down — by then the box is clear.
   const everySectionPassed = document.getElementById('g-all-sections-pass').checked;
+  // Checked first, ahead of the form-completeness rules below: "this person
+  // shouldn't be graded yet" is an objection that filling the form in can't
+  // answer, so raising it before "you forgot the recording" avoids sending
+  // somebody off to do work they're about to be stopped on anyway. It's also
+  // ahead of the Drive upload and the AI call, so an out-of-order session costs
+  // neither.
+  const traineeForValidation = document.getElementById('g-trainee').value.trim();
+  if (!prereqsClearFor(traineeForValidation, sessionTypeForValidation)) {
+    prereqBlockedSubmit = true;
+    // The reason goes in the bar itself, next to the override that clears it,
+    // rather than in a status line at the opposite end of the form.
+    statusEl.textContent = '';
+    statusEl.className = '';
+    renderPrereqGate({ alarm: true });
+    return;
+  }
   if (!audioFile && rawGradeVal === '') {
     statusEl.textContent = 'Add an audio recording to grade with AI, or a manual grade, or both.';
     statusEl.className = 'err';
@@ -3058,6 +3315,11 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     document.getElementById('g-grader').disabled = false;
     document.getElementById('g-all-sections-pass').disabled = false;
     renderCertPreview();
+    // The form is empty again, so an override granted for the person who was in
+    // it must not still be standing for whoever is picked next.
+    prereqOverride = null;
+    prereqBlockedSubmit = false;
+    renderPrereqGate();
     loadRecentLog();
 
     // Kick off AI grading in the background — this form only has one name field
