@@ -922,12 +922,24 @@ const SESSION_TABS = [
     blurb: 'Score a recorded conversion call the same way a Training Day is scored — section by section, with short written feedback and jump-to-the-moment timestamps for anything worth a second listen.'
   },
   {
+    key: 'stage1',
+    label: 'Stage 1 Interview',
+    sessionType: 'Stage 1 Interview',
+    status: 'preview',
+    phase: 'Phase 3 · More session types',
+    blurb: 'Score a recorded first-stage interview, section by section, with the same evidence timestamps the Training Day grader produces today.'
+  },
+  {
     // Two kinds of reference check, one tab. Jordan's call (2026-08-13): the
     // candidate reference check and the parent reference check are close
     // enough in shape that a second tab would just be clutter — you pick
     // which one you're grading inside the tab instead. When this goes live
     // each variant still needs its OWN rubric and its own sessionType string
     // in Code.gs; `variants` below is the list of those strings.
+    //
+    // Sits between Stage 1 and Stage 2 because that's where it falls in the
+    // real hiring process — references get called after the first interview,
+    // before the second. The tab order IS the process order; keep it that way.
     key: 'reference',
     label: 'Reference Checks',
     // The tab is plural (it holds two kinds); a single graded session isn't.
@@ -938,14 +950,6 @@ const SESSION_TABS = [
     status: 'preview',
     phase: 'Phase 3 · More session types',
     blurb: 'Score a recorded reference check against DECO&rsquo;s own criteria, so every candidate gets read the same way no matter who made the call. Candidate reference checks and parent reference checks both live here &mdash; you pick which one you&rsquo;re grading.'
-  },
-  {
-    key: 'stage1',
-    label: 'Stage 1 Interview',
-    sessionType: 'Stage 1 Interview',
-    status: 'preview',
-    phase: 'Phase 3 · More session types',
-    blurb: 'Score a recorded first-stage interview, section by section, with the same evidence timestamps the Training Day grader produces today.'
   },
   {
     key: 'stage2',
