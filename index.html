@@ -30,35 +30,66 @@
        --brand-orange itself is reserved for fills (buttons, badges, large
        decorative headlines) where it's paired with black text instead. */
     --accent:           #b5590d;
-    --surface-1:        color-mix(in srgb, var(--brand-cream) 5%, white 95%);
-    --page:             color-mix(in srgb, var(--brand-cream) 10%, white 90%);
+    /* Surfaces are a real ladder, not three shades of the same off-white. The
+       page is warm, a card is white and lifted off it by a shadow, and --sunken
+       is for wells *inside* a card (inputs, nested boxes). Before this, page and
+       card differed by 5% of cream and cards read as flat regions of the page. */
+    --page:             #f7f3ec;
+    --surface-1:        #ffffff;
+    --sunken:           #f4efe6;
     --text-primary:     #14110d;
     --text-secondary:   #5c5347;
     --text-muted:       #8f8676;
-    --gridline:         #e6ddc9;
-    --border:           rgba(20,15,10,0.10);
-    --good:             #0ca30c;
+    --gridline:         #ece4d6;
+    --border:           rgba(24,16,8,0.09);
+    --border-strong:    rgba(24,16,8,0.16);
+    --good:             #0f8a3c;
     --warning:          #a16207;
-    --critical:         #d03b3b;
+    --critical:         #cf3a3a;
     --pending:          var(--brand-taupe);
+    /* Warm-tinted rather than neutral grey: a cool shadow over a cream page
+       reads as dirt. Two layers each — a tight contact shadow and a wide soft
+       one — which is what separates a card that looks placed from one that
+       looks pasted on. */
+    --shadow-sm:        0 1px 2px rgba(38,25,12,0.05), 0 1px 3px rgba(38,25,12,0.04);
+    --shadow-md:        0 1px 2px rgba(38,25,12,0.05), 0 10px 24px -14px rgba(38,25,12,0.28);
+    --shadow-lg:        0 2px 4px rgba(38,25,12,0.05), 0 24px 48px -24px rgba(38,25,12,0.32);
+    --shadow-pop:       0 2px 6px rgba(38,25,12,0.08), 0 16px 32px -18px rgba(38,25,12,0.40);
+    --ring:             0 0 0 3px color-mix(in srgb, var(--brand-orange) 28%, transparent);
+    --radius-sm:        9px;
+    --radius-md:        13px;
+    --radius-lg:        18px;
     --font-body:        'Sora', system-ui, -apple-system, "Segoe UI", sans-serif;
     --font-display:     'Caviar Dreams', 'Baloo 2', 'Trebuchet MS', var(--font-body);
+    --ease:             cubic-bezier(0.22, 0.61, 0.36, 1);
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
       color-scheme: dark;
-      --surface-1:      #1a1815;
-      --page:           #0d0c0a;
+      /* Same ladder in reverse: the page is the darkest thing, a card sits
+         above it, a well sits below it. All three carry a little of the brand
+         warmth so the dark theme doesn't go blue-grey. */
+      --page:           #0b0a08;
+      --surface-1:      #16140f;
+      --sunken:         #100e0b;
       --text-primary:   #ffffff;
       --text-secondary: #cdc6b8;
       --text-muted:     #9a9284;
-      --gridline:       #2e2a24;
-      --border:         rgba(255,255,255,0.10);
-      --good:           #0ca30c;
+      --gridline:       #2b2721;
+      --border:         rgba(255,255,255,0.09);
+      --border-strong:  rgba(255,255,255,0.18);
+      --good:           #35c46a;
       --warning:        #fdba31;
-      --critical:       #e66767;
+      --critical:       #f07171;
       --accent:         var(--brand-orange);
       --pending:        #b7ac95;
+      /* Shadows barely register on near-black, so depth in dark mode comes
+         mostly from the border highlight on .panel — these stay subtle rather
+         than being scaled up into muddy halos. */
+      --shadow-sm:      0 1px 2px rgba(0,0,0,0.40);
+      --shadow-md:      0 2px 4px rgba(0,0,0,0.40), 0 12px 28px -16px rgba(0,0,0,0.80);
+      --shadow-lg:      0 4px 8px rgba(0,0,0,0.45), 0 28px 56px -28px rgba(0,0,0,0.90);
+      --shadow-pop:     0 4px 10px rgba(0,0,0,0.50), 0 20px 40px -20px rgba(0,0,0,0.95);
     }
   }
   * { box-sizing: border-box; accent-color: var(--brand-orange); }
@@ -67,6 +98,36 @@
     font-family: var(--font-body);
     background: var(--page);
     color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* A very wide, very faint orange wash top-left. Invisible as a colour,
+       but it stops a full-bleed flat background from looking like unstyled
+       paper — the page reads as lit rather than printed. */
+    background-image:
+      radial-gradient(1200px 620px at 8% -10%, color-mix(in srgb, var(--brand-orange) 7%, transparent), transparent 70%),
+      radial-gradient(900px 500px at 100% 0%, color-mix(in srgb, var(--brand-orange-lt) 6%, transparent), transparent 65%);
+    background-attachment: fixed;
+  }
+  ::selection { background: color-mix(in srgb, var(--brand-orange) 32%, transparent); }
+  /* Scrollbars are part of the finish on a data-dense app — the default chunky
+     grey ones on the table wraps undo a lot of the rest of this. */
+  * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover { background: var(--text-muted); background-clip: content-box; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
   /* Three-column grid rather than flex space-between: the brand line in the
      middle has to sit centred in the banner itself, not merely in whatever gap
@@ -77,9 +138,18 @@
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
     gap: 16px;
-    padding: 14px 24px;
-    background: var(--brand-black);
+    padding: 15px 28px;
+    /* Not flat black. A near-black gradient with a warm cast at the left edge
+       gives the banner a light source, and the 3px orange rule below reads as
+       the bottom of a solid object rather than a stripe drawn on a rectangle. */
+    background:
+      radial-gradient(680px 200px at 6% 130%, color-mix(in srgb, var(--brand-orange) 22%, transparent), transparent 70%),
+      linear-gradient(180deg, #121110 0%, var(--brand-black) 100%);
     border-bottom: 3px solid var(--brand-orange);
+    box-shadow: 0 10px 30px -18px rgba(0,0,0,0.85);
+    position: sticky;
+    top: 0;
+    z-index: 40;
   }
   /* Columns are pinned explicitly. Without this, hiding the middle item at
      narrow widths makes the auth block flow up into column 2 and strand itself
@@ -129,7 +199,31 @@
   #auth-area { grid-column: 3; display: flex; align-items: center; gap: 10px; justify-self: end; }
   @media (max-width: 1220px) { .header-quote { display: none; } }
   @media (max-width: 700px) { .brand-divider, .brand-appname { display: none; } }
-  #auth-status { font-size: 13px; color: rgba(255,255,255,0.72); }
+  /* The signed-in state is a status, not a label — a dot plus a chip reads as
+     a live connection the way bare grey text never does. */
+  #auth-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px 5px 10px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.78);
+  }
+  #auth-status::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--brand-taupe);
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.06);
+  }
+  #auth-status.is-live::before {
+    background: #35c46a;
+    box-shadow: 0 0 0 3px color-mix(in srgb, #35c46a 22%, transparent);
+  }
   /* Pill / eyebrow tag — the rounded-capsule label used throughout the brand
      book for section breadcrumbs (e.g. "WHO WE ARE | BUSINESS DESCRIPTION").
      Reused here as a small on-brand context label above panel headings. */
@@ -137,62 +231,113 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 14px;
+    padding: 6px 15px;
     border-radius: 999px;
-    background: var(--brand-orange);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--brand-orange) 88%, white), var(--brand-orange));
     color: var(--brand-black);
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-bottom: 10px;
+    letter-spacing: 0.08em;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 2px rgba(38,25,12,0.12), 0 10px 20px -12px color-mix(in srgb, var(--brand-orange) 80%, transparent);
   }
   .btn {
     font: inherit;
     font-size: 13px;
     font-weight: 700;
-    padding: 9px 18px;
+    letter-spacing: 0.01em;
+    padding: 10px 20px;
     border-radius: 999px;
     border: 1px solid transparent;
-    background: var(--brand-orange);
+    /* A flat fill reads as a coloured rectangle; the sheen plus a shadow in the
+       button's own hue is what makes it read as a raised, pressable object. */
+    background: linear-gradient(180deg, color-mix(in srgb, var(--brand-orange) 88%, white) 0%, var(--brand-orange) 100%);
     color: var(--brand-black);
     cursor: pointer;
-    transition: filter 0.15s ease;
+    box-shadow: 0 1px 2px rgba(38,25,12,0.14), 0 8px 18px -10px color-mix(in srgb, var(--brand-orange) 75%, transparent);
+    transition: transform 0.12s var(--ease), box-shadow 0.18s var(--ease), filter 0.15s var(--ease), background 0.15s var(--ease);
   }
-  .btn:hover:not(:disabled) { filter: brightness(1.06); }
-  .btn:focus-visible { outline: 2px solid var(--brand-orange); outline-offset: 2px; }
+  .btn:hover:not(:disabled) {
+    filter: brightness(1.04);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(38,25,12,0.16), 0 14px 26px -12px color-mix(in srgb, var(--brand-orange) 85%, transparent);
+  }
+  /* Presses down and loses its lift — without this the button never
+     acknowledges the click, which is most of what "feels cheap" is. */
+  .btn:active:not(:disabled) { transform: translateY(0); box-shadow: 0 1px 2px rgba(38,25,12,0.18); }
+  .btn:focus-visible { outline: none; box-shadow: var(--ring), 0 8px 18px -10px color-mix(in srgb, var(--brand-orange) 75%, transparent); }
   header .btn.secondary {
-    background: transparent;
+    background: rgba(255,255,255,0.07);
     color: var(--brand-white);
-    border: 1px solid rgba(255,255,255,0.28);
+    border: 1px solid rgba(255,255,255,0.20);
+    box-shadow: none;
   }
-  .btn.secondary { background: transparent; color: var(--text-primary); border: 1px solid var(--border); }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  header .btn.secondary:hover:not(:disabled) { background: rgba(255,255,255,0.14); }
+  .btn.secondary {
+    background: var(--surface-1);
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-sm);
+  }
+  .btn.secondary:hover:not(:disabled) {
+    background: var(--surface-1);
+    border-color: color-mix(in srgb, var(--brand-orange) 55%, transparent);
+    color: var(--accent);
+    box-shadow: var(--shadow-md);
+  }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; transform: none; }
   /* Seven tabs now (Dashboard + six session types), so the row can run wider
      than a narrow window. Scroll it sideways rather than wrapping to two
      lines, which would break the single underline the active tab sits on. */
+  /* Sticks under the header so you never lose your place in the app while
+     reading a long results card, and blurs whatever scrolls beneath it rather
+     than sitting on an opaque bar. */
   nav.tabs {
     display: flex;
-    gap: 4px;
-    padding: 0 24px;
-    background: var(--surface-1);
+    gap: 2px;
+    padding: 8px 28px 0;
+    background: color-mix(in srgb, var(--surface-1) 82%, transparent);
+    backdrop-filter: saturate(1.6) blur(12px);
+    -webkit-backdrop-filter: saturate(1.6) blur(12px);
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
     scrollbar-width: thin;
+    position: sticky;
+    top: 66px;
+    z-index: 30;
   }
   nav.tabs button {
+    position: relative;
     font: inherit;
-    font-size: 14px;
+    font-size: 13.5px;
     font-weight: 600;
-    padding: 12px 14px;
+    padding: 11px 15px 13px;
+    margin-bottom: -1px;
     background: none;
     border: none;
-    border-bottom: 2px solid transparent;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     color: var(--text-secondary);
     cursor: pointer;
     white-space: nowrap;
     flex: 0 0 auto;
+    transition: color 0.16s var(--ease), background 0.16s var(--ease);
   }
+  /* The underline is a pseudo-element with rounded caps that grows out from the
+     centre, rather than a border that snaps on. Cheap to do, and it's the sort
+     of detail that separates a real product from a styled page. */
+  nav.tabs button::after {
+    content: '';
+    position: absolute;
+    left: 12px; right: 12px; bottom: 0;
+    height: 3px;
+    border-radius: 999px 999px 0 0;
+    background: var(--brand-orange);
+    transform: scaleX(0);
+    transition: transform 0.22s var(--ease);
+  }
+  nav.tabs button.active::after { transform: scaleX(1); }
+  nav.tabs button:focus-visible { outline: none; box-shadow: var(--ring); }
   /* Tabs whose session type isn't wired up yet read one step back from the
      live ones, so it's obvious at a glance which tabs actually do something. */
   nav.tabs button.tab-preview { color: var(--text-muted); }
@@ -205,36 +350,54 @@
     background: var(--brand-taupe);
     vertical-align: middle;
   }
-  nav.tabs button:hover { color: var(--text-primary); }
-  nav.tabs button.active {
-    color: var(--accent);
-    border-bottom-color: var(--brand-orange);
-  }
+  nav.tabs button:hover { color: var(--text-primary); background: color-mix(in srgb, var(--brand-orange) 8%, transparent); }
+  nav.tabs button.active { color: var(--accent); }
   main {
-    max-width: 1200px;
+    max-width: 1240px;
     margin: 0 auto;
-    padding: 24px;
+    padding: 28px 28px 64px;
   }
   .panel {
     background: var(--surface-1);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 20px;
-    margin-bottom: 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    margin-bottom: 22px;
+    box-shadow: var(--shadow-md);
+  }
+  /* In dark mode a shadow on near-black does nothing, so the card is separated
+     from the page by a 1px highlight along its top edge instead — the standard
+     trick, and the reason dark cards here read as raised rather than as holes. */
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .panel {
+      background-image: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 120px);
+      border-color: rgba(255,255,255,0.08);
+    }
   }
   .note {
+    position: relative;
     font-size: 13px;
-    line-height: 1.5;
+    line-height: 1.6;
     color: var(--text-secondary);
-    background: color-mix(in srgb, var(--brand-cream) 45%, var(--surface-1));
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--brand-orange);
-    border-radius: 8px;
-    padding: 12px 14px;
-    margin-bottom: 20px;
+    background: color-mix(in srgb, var(--brand-cream) 38%, var(--surface-1));
+    border: 1px solid color-mix(in srgb, var(--brand-orange) 22%, var(--border));
+    border-radius: var(--radius-md);
+    padding: 14px 16px 14px 18px;
+    margin-bottom: 22px;
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
   }
-  .note strong { color: var(--text-primary); }
+  /* The accent edge is an inset bar with rounded ends rather than a border-left
+     running corner to corner — it sits inside the rounded card instead of
+     fighting its radius. */
+  .note::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--brand-orange), var(--brand-orange-lt));
+  }
+  .note strong { color: var(--text-primary); font-weight: 700; }
 
   /* ---- Preview tabs (Conversion Call, Reference Check, Stage 1 & 2
      Interview) -------------------------------------------------------------
@@ -274,9 +437,9 @@
   .preview-step {
     flex: 1 1 210px;
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 16px;
-    background: var(--page);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    background: var(--sunken);
   }
   .preview-step-num {
     display: flex;
@@ -327,41 +490,73 @@
     transition: width 0.6s ease;
   }
   .ai-progress-elapsed { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
-  .filters { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  /* The filter row is a toolbar, so it's drawn as one: a sunken strip that the
+     controls sit in, rather than loose pills floating on the card. */
+  .filters {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 10px;
+    border-radius: 999px;
+    background: var(--sunken);
+    border: 1px solid var(--border);
+  }
   .filters select, .filters input {
     font: inherit;
     font-size: 13px;
-    padding: 7px 10px;
+    padding: 8px 14px;
     border-radius: 999px;
     border: 1px solid var(--border);
     background: var(--surface-1);
     color: var(--text-primary);
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
   }
+  .filters input { flex: 1 1 180px; min-width: 140px; }
+  .filters .btn { margin-left: auto; }
+  .filters select:hover, .filters input:hover { border-color: var(--border-strong); }
   .filters select:focus-visible, .filters input:focus-visible,
-  .field select:focus-visible, .field input:focus-visible, .field textarea:focus-visible {
+  .field select:focus-visible, .field input:focus-visible, .field textarea:focus-visible,
+  .followup-actions input[type="text"]:focus-visible {
     outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+    border-color: var(--brand-orange);
+    box-shadow: var(--ring);
   }
   #dashboard-table-wrap, #recent-log-wrap {
     overflow-x: auto;
     max-width: 100%;
     -webkit-overflow-scrolling: touch;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--surface-1);
   }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td {
     text-align: left;
-    padding: 10px 12px;
+    padding: 12px 14px;
     border-bottom: 1px solid var(--gridline);
     white-space: nowrap;
   }
-  tbody tr:hover { background: var(--page); }
-  th {
-    font-weight: 600;
-    color: var(--text-secondary);
-    font-size: 12px;
+  /* Numbers in a table have to line up column-wise or the whole thing reads as
+     sloppy — one global rule beats remembering it per cell. */
+  td { font-variant-numeric: tabular-nums; }
+  tbody tr { transition: background 0.14s var(--ease); }
+  tbody tr:hover { background: var(--sunken); }
+  tbody tr:last-child td { border-bottom: none; }
+  /* Headers stay put while a long roster scrolls under them. */
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--sunken);
+    font-weight: 700;
+    color: var(--text-muted);
+    font-size: 10.5px;
     text-transform: uppercase;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.09em;
+    border-bottom: 1px solid var(--border);
   }
   td.name-cell { font-weight: 600; white-space: normal; }
   td.region-cell { color: var(--text-secondary); white-space: normal; }
@@ -378,43 +573,88 @@
     font-size: 10.5px;
     line-height: 1.3;
   }
+  /* A tint alone goes soft against a white card. The 1px ring in the badge's own
+     hue is what makes a status read as a discrete token rather than highlighted
+     text — and it's what keeps Done / Not yet legible at 11px on the Dashboard. */
   .badge {
     display: inline-flex;
     align-items: center;
     gap: 5px;
     font-size: 12px;
-    font-weight: 600;
-    padding: 3px 8px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    padding: 4px 10px;
     border-radius: 999px;
+    border: 1px solid transparent;
     white-space: nowrap;
   }
   #dashboard-table-wrap .badge {
     font-size: 11px;
-    padding: 3px 6px;
+    padding: 3px 8px;
   }
-  .badge.good { color: var(--good); background: color-mix(in srgb, var(--good) 14%, transparent); }
-  .badge.warning { color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); }
-  .badge.pending { color: var(--pending); background: color-mix(in srgb, var(--pending) 18%, transparent); }
-  .badge.critical { color: var(--critical); background: color-mix(in srgb, var(--critical) 14%, transparent); }
+  .badge.good {
+    color: var(--good);
+    background: color-mix(in srgb, var(--good) 12%, transparent);
+    border-color: color-mix(in srgb, var(--good) 32%, transparent);
+  }
+  .badge.warning {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+    border-color: color-mix(in srgb, var(--warning) 34%, transparent);
+  }
+  .badge.pending {
+    color: var(--pending);
+    background: color-mix(in srgb, var(--pending) 16%, transparent);
+    border-color: color-mix(in srgb, var(--pending) 36%, transparent);
+  }
+  .badge.critical {
+    color: var(--critical);
+    background: color-mix(in srgb, var(--critical) 12%, transparent);
+    border-color: color-mix(in srgb, var(--critical) 32%, transparent);
+  }
   .badge svg { width: 12px; height: 12px; flex: none; }
-  form.grading-form { display: flex; flex-direction: column; gap: 14px; max-width: 560px; }
+  form.grading-form { display: flex; flex-direction: column; gap: 18px; max-width: 580px; }
   .field label {
     display: block;
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 6px;
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    margin-bottom: 7px;
   }
   .field select, .field input, .field textarea {
     width: 100%;
     font: inherit;
     font-size: 14px;
-    padding: 9px 10px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    background: var(--page);
+    padding: 11px 13px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-strong);
+    background: var(--sunken);
     color: var(--text-primary);
+    transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), background 0.15s var(--ease);
   }
-  .field textarea { min-height: 110px; resize: vertical; }
+  .field select:hover, .field input:hover, .field textarea:hover { border-color: color-mix(in srgb, var(--brand-orange) 40%, var(--border-strong)); }
+  .field select:focus, .field input:focus, .field textarea:focus { background: var(--surface-1); }
+  .field textarea { min-height: 110px; resize: vertical; line-height: 1.6; }
+  /* The stock file input is the single most "unfinished" looking control on the
+     page — restyle its button so it matches the secondary buttons everywhere else. */
+  .field input[type="file"] { padding: 9px 12px; cursor: pointer; }
+  .field input[type="file"]::file-selector-button {
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 700;
+    margin-right: 12px;
+    padding: 7px 15px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-1);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: border-color 0.15s var(--ease), color 0.15s var(--ease);
+  }
+  .field input[type="file"]::file-selector-button:hover {
+    border-color: color-mix(in srgb, var(--brand-orange) 55%, transparent);
+    color: var(--accent);
+  }
   /* Manual grade is a number input but reads more like a plain score field
      than a stepper, so the browser's up/down spinner arrows are hidden. */
   #g-grade::-webkit-outer-spin-button, #g-grade::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
@@ -439,14 +679,14 @@
      that flips from a mistyped score should be caught while the score is still
      on screen and editable, not confirmed a minute later after the upload. */
   .cert-preview {
-    margin-top: 8px;
-    padding: 8px 10px;
-    border-radius: 8px;
+    margin-top: 10px;
+    padding: 10px 13px;
+    border-radius: var(--radius-sm);
     font-size: 12.5px;
-    line-height: 1.45;
+    line-height: 1.5;
     border: 1px solid var(--border);
     color: var(--text-secondary);
-    background: color-mix(in srgb, var(--text-muted) 7%, transparent);
+    background: color-mix(in srgb, var(--text-muted) 8%, transparent);
   }
   .cert-preview.will-certify {
     color: var(--good);
@@ -458,11 +698,11 @@
   #grade-status { font-size: 13px; margin-top: 4px; }
   #grade-status.ok { color: var(--good); }
   #grade-status.err { color: var(--critical); }
-  .empty-state { color: var(--text-muted); font-size: 13px; padding: 24px; text-align: center; }
+  .empty-state { color: var(--text-muted); font-size: 13px; padding: 40px 24px; text-align: center; line-height: 1.6; }
   /* A delete that didn't work has to be readable, not a label that flashes by. */
   .log-delete-error {
     color: var(--critical); font-size: 13px; line-height: 1.5; margin: 0 0 12px;
-    padding: 10px 14px; border-radius: 8px;
+    padding: 12px 16px; border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--critical) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--critical) 35%, transparent);
   }
@@ -471,10 +711,11 @@
      can't know where a "Yes" came from (see offerUncertifyAfterDelete). */
   .log-cert-notice {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    color: var(--text-primary); font-size: 13px; line-height: 1.5; margin: 0 0 12px;
-    padding: 10px 14px; border-radius: 8px;
+    color: var(--text-primary); font-size: 13px; line-height: 1.55; margin: 0 0 12px;
+    padding: 14px 16px; border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--warning) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+    box-shadow: var(--shadow-sm);
   }
   .log-cert-notice.done {
     background: color-mix(in srgb, var(--good) 12%, transparent);
@@ -488,55 +729,176 @@
   .log-cert-notice .btn.ghost {
     background: transparent; color: var(--text-secondary); border: 1px solid var(--border);
   }
-  .signed-out-lock { text-align: center; padding: 56px 24px 48px; color: var(--text-secondary); }
-  .signed-out-lock .lock-icon { width: 56px; height: 56px; opacity: 0.9; margin-bottom: 18px; }
-  .signed-out-lock .lock-title { margin: 0 0 10px; font-size: 15px; }
+  /* First screen anyone sees, and the only one shown to someone who isn't signed
+     in yet — so it's treated as a front door rather than a placeholder. */
+  .signed-out-lock {
+    position: relative;
+    text-align: center;
+    padding: 88px 24px 80px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+  }
+  .signed-out-lock::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(560px 280px at 50% 0%, color-mix(in srgb, var(--brand-orange) 12%, transparent), transparent 70%);
+    pointer-events: none;
+  }
+  .signed-out-lock > * { position: relative; }
+  .signed-out-lock .lock-icon {
+    width: 64px; height: 64px;
+    margin-bottom: 24px;
+    filter: drop-shadow(0 12px 24px color-mix(in srgb, var(--brand-orange) 30%, transparent));
+  }
+  .signed-out-lock .lock-title { margin: 0 auto 16px; font-size: 16px; line-height: 1.6; max-width: 46ch; }
   .signed-out-lock .lock-tagline {
     margin: 0;
     font-family: var(--font-display);
-    font-size: 20px;
+    font-size: 26px;
+    letter-spacing: 0.01em;
     color: var(--brand-orange);
   }
+  /* ---- Dashboard stat strip ----
+     Where the roster stands, above the roster. Every figure is counted from
+     data the page already holds, so this adds no read and can never disagree
+     with the table underneath it. */
+  .stat-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 14px;
+    margin-bottom: 22px;
+  }
+  .stat-strip:empty { display: none; }
+  .stat-card {
+    position: relative;
+    padding: 18px 20px 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .stat-card {
+      background-image: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 90px);
+    }
+  }
+  .stat-card-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+  .stat-card-value {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 34px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-card-of { font-size: 15px; font-weight: 600; color: var(--text-muted); letter-spacing: 0; }
+  .stat-card-sub { margin-top: 9px; font-size: 11.5px; line-height: 1.45; color: var(--text-secondary); }
+  /* A count means little without the denominator beside it, so the ones that
+     have a denominator get a bar. Purely a restatement of the numbers above —
+     it's there to be readable at a glance across the room, not to add data. */
+  .stat-card-bar {
+    height: 5px;
+    margin-top: 12px;
+    border-radius: 999px;
+    background: var(--sunken);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .stat-card-bar span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--brand-orange-lt), var(--brand-orange));
+    transition: width 0.6s var(--ease);
+  }
+  .stat-card.is-good .stat-card-bar span { background: linear-gradient(90deg, color-mix(in srgb, var(--good) 65%, white), var(--good)); }
+  .stat-card.is-alert .stat-card-value { color: var(--warning); }
   .hidden { display: none !important; }
-  .recent-log { margin-top: 24px; }
-  .recent-log h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.02em; color: var(--text-secondary); margin: 0 0 10px; }
+  .recent-log { margin-top: 32px; }
+  /* Reads as a section divider inside the card, not a stray bit of small caps:
+     the hairline runs out from the label to the edge. */
+  .recent-log h3 {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--text-muted);
+    margin: 0 0 14px;
+  }
+  .recent-log h3::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--gridline), transparent);
+  }
   .ai-result-box:empty { display: none; }
   .ai-result-box {
-    margin-top: 16px;
-    padding: 18px 20px;
+    margin-top: 20px;
+    padding: 22px 24px;
     border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--page);
+    border-radius: var(--radius-lg);
+    background: var(--sunken);
     font-size: 13px;
     white-space: normal;
     max-width: 100%;
     overflow-wrap: break-word;
   }
-  .ai-result-box h4 { margin: 0 0 14px; font-size: 15px; font-weight: 700; }
+  .ai-result-box h4 { margin: 0 0 18px; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+  /* The numbers at the top of a result are the summary of the whole card, so
+     they're drawn as a proper stat strip — raised, divided, evenly spaced —
+     rather than a row of labelled text runs. */
   .ai-summary-row {
     display: flex;
     align-items: stretch;
-    gap: 36px;
+    gap: 0;
     flex-wrap: wrap;
-    margin-bottom: 16px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--gridline);
+    margin-bottom: 20px;
+    padding: 18px 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-sm);
   }
-  .ai-stat { display: flex; flex-direction: column; gap: 4px; justify-content: space-between; }
+  .ai-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    justify-content: space-between;
+    flex: 1 1 auto;
+    padding: 0 22px;
+    border-left: 1px solid var(--gridline);
+  }
+  .ai-stat:first-child { border-left: none; }
   .ai-stat-label {
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.02em;
-    color: var(--text-secondary);
+    letter-spacing: 0.09em;
+    color: var(--text-muted);
   }
-  .ai-stat-value { font-size: 20px; font-weight: 700; line-height: 1.2; }
+  .ai-stat-value { font-size: 20px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
   /* The total score is the headline number of the whole result, so it gets a
      display-sized treatment; the "/ 110" stays small so the score reads first. */
   .ai-stat-value.ai-stat-score {
-    font-size: 44px;
+    font-size: 46px;
     line-height: 1;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.03em;
     white-space: nowrap;
   }
   .ai-stat-score .ai-score-max {
@@ -647,11 +1009,12 @@
     flex-direction: column;
     gap: 9px;
     margin: 0 0 18px;
-    padding: 12px 14px;
+    padding: 14px 16px;
     border: 1px solid var(--border);
     border-left: 3px solid var(--brand-orange);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--brand-cream) 30%, var(--surface-1));
+    box-shadow: var(--shadow-sm);
   }
   .ai-audio-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   /* A little louder than a stock secondary button: on the cream strip the
@@ -804,12 +1167,13 @@
     margin-bottom: 14px;
   }
   .ai-callout {
-    padding: 12px 14px;
-    border-radius: 8px;
+    padding: 15px 17px;
+    border-radius: var(--radius-md);
     background: var(--surface-1);
     border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
     font-size: 13px;
-    line-height: 1.5;
+    line-height: 1.55;
   }
   .ai-callout-label {
     display: block;
@@ -834,11 +1198,12 @@
      survive a 220px column. The accent edge marks it as the one thing on this
      card that's an instruction rather than an observation. */
   .ai-corrections {
-    padding: 14px 16px;
-    border-radius: 8px;
+    padding: 17px 19px;
+    border-radius: var(--radius-md);
     background: var(--surface-1);
     border: 1px solid var(--border);
     border-left: 3px solid var(--brand-orange);
+    box-shadow: var(--shadow-sm);
     margin-bottom: 14px;
   }
   .ai-corrections .ai-callout-label { color: var(--brand-orange); }
@@ -955,16 +1320,18 @@
      with only the bits that differ styled here. */
   .tab-count {
     display: inline-block;
-    min-width: 18px;
-    margin-left: 7px;
+    min-width: 19px;
+    margin-left: 8px;
     padding: 1px 6px;
     border-radius: 999px;
     background: var(--brand-orange);
     color: var(--brand-black);
-    font-size: 11px;
-    font-weight: 700;
+    font-size: 10.5px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
     text-align: center;
     vertical-align: middle;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-orange) 16%, transparent);
   }
   .followup-summary {
     font-size: 13px;
@@ -1016,7 +1383,7 @@
     flex-wrap: wrap;
     padding: 14px 24px;
     border-bottom: 1px solid var(--border);
-    background: var(--page);
+    background: var(--sunken);
   }
   .followup-actions label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
   .followup-actions input[type="text"] {
@@ -1061,10 +1428,13 @@
   .person-sessions-intro { font-size: 12px; color: var(--text-secondary); }
   .person-session {
     border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--page);
+    border-radius: var(--radius-md);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-sm);
     overflow: hidden;
+    transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
   }
+  .person-session.has-ai:hover { border-color: color-mix(in srgb, var(--brand-orange) 40%, var(--border)); box-shadow: var(--shadow-md); }
   .person-session-head {
     display: flex;
     align-items: center;
@@ -1136,6 +1506,10 @@
         team on-site day, they can go on team visits without being certified — but they can't run a training
         session themselves until they're certified on training days.
       </div>
+      <!-- Where the roster stands, above the roster itself. Everything here is
+           counted from data already loaded (renderDashboardStats) — no extra
+           Sheet read, and nothing is shown that the table below doesn't also say. -->
+      <div id="dashboard-stats" class="stat-strip" aria-live="polite"></div>
       <div class="panel">
         <div class="filters">
           <select id="filter-region"><option value="">All regions</option></select>
@@ -1494,7 +1868,14 @@ document.getElementById('signout-btn').addEventListener('click', () => {
   forceSignedOut('Not signed in');
 });
 
-function setAuthStatus(text) { document.getElementById('auth-status').textContent = text; }
+// The dot next to the status goes green only for a live signed-in session —
+// every other message this shows ("Not signed in", "Session expired", …) is a
+// state where the app can't reach the Sheets, and the dot must not say otherwise.
+function setAuthStatus(text) {
+  const el = document.getElementById('auth-status');
+  el.textContent = text;
+  el.classList.toggle('is-live', /^signed in/i.test(text || ''));
+}
 
 function forceSignedOut(message) {
   accessToken = null;
@@ -1873,6 +2254,9 @@ function renderDashboardTable() {
     (!role || r['Role'] === role) &&
     (!search || (r['Name'] || '').toLowerCase().includes(search))
   );
+  // Roster-wide, so it's drawn before the filter check below — "12 of 30
+  // certified" must not change because someone typed a name into the search box.
+  renderDashboardStats();
   const wrap = document.getElementById('dashboard-table-wrap');
   if (!filtered.length) { wrap.innerHTML = '<div class="empty-state">No matching people.</div>'; return; }
 
@@ -2095,6 +2479,69 @@ function flagBadge(val) {
     ? `<span class="badge good">${checkIcon()}Done</span>`
     : `<span class="badge pending">${dashIcon()}Pending</span>`;
 }
+/* Where the roster stands, drawn above it. Everything is counted from
+   rosterRows / followUpItems, both of which are already in memory — this must
+   never trigger a read of its own, and must never say anything the table below
+   it doesn't also say. Called from renderDashboardTable (so it follows the
+   roster) and from renderFollowUps (so the follow-up figure lands once that
+   list has loaded, which happens a moment later). */
+function renderDashboardStats() {
+  const el = document.getElementById('dashboard-stats');
+  if (!el) return;
+  if (!rosterRows.length) { el.innerHTML = ''; return; }
+
+  const yes = (r, col) => (r[col] || '').trim().toLowerCase() === 'yes';
+  const total = rosterRows.length;
+  const trainingCert = rosterRows.filter(r => yes(r, 'Certified - Training Days')).length;
+  const onsiteCert = rosterRows.filter(r => yes(r, 'Certified - Team On-Site Days')).length;
+  // Deliberately the count of people the roster says are *ready to be trained
+  // on*, not a re-derivation of the certification rule — that rule lives in the
+  // note above this strip and in the Smartsheet, and copying it here would give
+  // it a second home to drift in.
+  const openFollowUps = followUpItems.filter(i => !isAddressed(i)).length;
+
+  const pct = (n) => total ? Math.round((n / total) * 100) : 0;
+  const card = ({ label, value, of, sub, bar, cls }) =>
+    `<div class="stat-card${cls ? ' ' + cls : ''}">` +
+      `<span class="stat-card-label">${escapeHtml(label)}</span>` +
+      `<div class="stat-card-value">${value}${of ? `<span class="stat-card-of">${escapeHtml(of)}</span>` : ''}</div>` +
+      (sub ? `<div class="stat-card-sub">${sub}</div>` : '') +
+      (bar === undefined ? '' : `<div class="stat-card-bar"><span style="width:${bar}%"></span></div>`) +
+    `</div>`;
+
+  el.innerHTML = [
+    card({
+      label: 'People on the roster',
+      value: total,
+      sub: `${[...new Set(rosterRows.map(r => (r['Region'] || '').trim()).filter(Boolean))].length} regions`
+    }),
+    card({
+      label: 'Certified — Training Days',
+      value: trainingCert,
+      of: `of ${total}`,
+      sub: `${total - trainingCert} still to certify`,
+      bar: pct(trainingCert),
+      cls: trainingCert === total ? 'is-good' : ''
+    }),
+    card({
+      label: 'Certified — Team On-Site Days',
+      value: onsiteCert,
+      of: `of ${total}`,
+      sub: `${total - onsiteCert} still to certify`,
+      bar: pct(onsiteCert),
+      cls: onsiteCert === total ? 'is-good' : ''
+    }),
+    card({
+      label: 'Sessions awaiting follow-up',
+      value: openFollowUps,
+      sub: openFollowUps
+        ? 'Graded under the bar — open the Follow-Ups tab'
+        : 'Nothing outstanding',
+      cls: openFollowUps ? 'is-alert' : ''
+    })
+  ].join('');
+}
+
 function certBadge(val) {
   const isYes = (val || '').trim().toLowerCase() === 'yes';
   return isYes
@@ -4033,6 +4480,9 @@ function updateFollowUpCount() {
   const open = followUpItems.filter(i => !isAddressed(i)).length;
   badge.textContent = String(open);
   badge.classList.toggle('hidden', open === 0);
+  // The Dashboard strip carries the same figure. Follow-Ups loads a moment
+  // after the roster, so this is what fills that card in once it arrives.
+  renderDashboardStats();
 }
 
 function renderFollowUps() {
