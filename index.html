@@ -1187,8 +1187,8 @@
             <textarea id="g-feedback" placeholder="What went well, what needs work…"></textarea>
           </div>
           <div class="field">
-            <label for="g-audio">Audio recording</label>
-            <input id="g-audio" type="file" accept="audio/*" required>
+            <label for="g-audio">Audio recording <span class="field-optional">(optional — this is what the AI grades; without it you're just recording a manual grade)</span></label>
+            <input id="g-audio" type="file" accept="audio/*">
           </div>
           <div>
             <button type="submit" class="btn" id="grade-submit-btn">Upload &amp; Submit Grade</button>
@@ -1854,9 +1854,9 @@ function renderDashboardTable() {
     // and says so when it opens.
     const count = submissionsCache ? submissionsForPerson(r['Name']).length : 0;
     const countBadge = count
-      ? ` <span class="roster-count" title="${count} recording${count === 1 ? '' : 's'} uploaded for this person. Click the row to see them.">${count} recording${count === 1 ? '' : 's'}</span>`
+      ? ` <span class="roster-count" title="${count} graded session${count === 1 ? '' : 's'} for this person. Click the row to see them.">${count} session${count === 1 ? '' : 's'}</span>`
       : '';
-    html += `<tr class="roster-row" data-row-index="${i}" title="Click to see this person's recordings">`;
+    html += `<tr class="roster-row" data-row-index="${i}" title="Click to see this person's sessions">`;
     html += `<td class="roster-chevron-cell"><span class="log-chevron">&#9656;</span></td>`;
     html += `<td class="name-cell">${escapeHtml(r['Name'])}${countBadge}</td>`;
     html += `<td>${escapeHtml(r['Role'])}</td>`;
@@ -1916,24 +1916,27 @@ function submissionsForPerson(name) {
 async function renderPersonSessions(name, container) {
   if (!container) return;
   if (!submissionsCache) {
-    container.innerHTML = '<div class="empty-state">Loading recordings…</div>';
+    container.innerHTML = '<div class="empty-state">Loading sessions…</div>';
     try {
       await fetchSubmissions();
     } catch (e) {
-      container.innerHTML = '<div class="empty-state">Could not load recordings: ' + escapeHtml(e.message) + '</div>';
+      container.innerHTML = '<div class="empty-state">Could not load sessions: ' + escapeHtml(e.message) + '</div>';
       return;
     }
   }
 
   const sessions = submissionsForPerson(name);
   if (!sessions.length) {
-    container.innerHTML = `<div class="empty-state">No recordings uploaded for ${escapeHtml(name)} yet.</div>`;
+    container.innerHTML = `<div class="empty-state">No sessions submitted for ${escapeHtml(name)} yet.</div>`;
     return;
   }
 
   const parsedAi = sessions.map(s => s.aiRow ? parseAiResultFromRow(s.aiRow) : null);
 
-  let html = `<div class="person-sessions-intro">${sessions.length} recording${sessions.length === 1 ? '' : 's'} for ` +
+  // "Sessions", not "recordings" — a manual grade can be submitted with no
+  // audio at all, so counting these as recordings would overstate what's
+  // actually there to listen to.
+  let html = `<div class="person-sessions-intro">${sessions.length} session${sessions.length === 1 ? '' : 's'} for ` +
     `<strong>${escapeHtml(name)}</strong>, newest first. Click one to see what the AI heard.</div>`;
 
   sessions.forEach((s, i) => {
@@ -2167,13 +2170,22 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
   e.preventDefault();
   const statusEl = document.getElementById('grade-status');
   const btn = document.getElementById('grade-submit-btn');
+  // Audio is optional. It's what the AI grades, so without it there's no AI
+  // result — but a session someone sat through and scored on paper is still
+  // worth recording, and (since a passing manual grade certifies) is a
+  // perfectly good way to sign somebody off. What's not allowed is a
+  // submission with neither: no recording and no score is an empty row.
   const audioFile = document.getElementById('g-audio').files[0];
-  if (!audioFile) { statusEl.textContent = 'Please choose an audio file.'; statusEl.className = 'err'; return; }
   const sessionTypeForValidation = currentSessionType;
   const gradeMaxForValidation = SESSION_MAX_POSSIBLE[sessionTypeForValidation] || 110;
   const rawGradeVal = document.getElementById('g-grade').value.trim();
   // Read before the form is reset further down — by then the box is clear.
   const everySectionPassed = document.getElementById('g-all-sections-pass').checked;
+  if (!audioFile && rawGradeVal === '') {
+    statusEl.textContent = 'Add an audio recording to grade with AI, or a manual grade, or both.';
+    statusEl.className = 'err';
+    return;
+  }
   if (rawGradeVal !== '') {
     const n = Number(rawGradeVal);
     if (!Number.isFinite(n) || n < 0 || n > gradeMaxForValidation) {
@@ -2186,15 +2198,23 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
 
   btn.disabled = true;
   statusEl.className = '';
-  statusEl.textContent = 'Uploading audio…';
+  statusEl.textContent = audioFile ? 'Uploading audio…' : 'Saving grade…';
   const aiStatusEl = document.getElementById('aiGradingStatus');
   const aiResultEl = document.getElementById('aiGradingResult');
   if (aiStatusEl) { aiStatusEl.classList.add('hidden'); aiStatusEl.textContent = ''; }
   if (aiResultEl) aiResultEl.innerHTML = '';
   try {
-    const fileMeta = await driveCreateFileMetadata(audioFile.name, AUDIO_FOLDER_ID);
-    await driveUploadContent(fileMeta.id, audioFile);
-    const fileInfo = await driveGetFile(fileMeta.id, 'webViewLink');
+    // No file, no Drive round trip — the row just carries a blank audio link.
+    // fetchSubmissions() already keeps link-less rows as their own submission
+    // rather than merging them, so several of these can't collapse into one.
+    let fileMeta = null;
+    let audioLink = '';
+    if (audioFile) {
+      fileMeta = await driveCreateFileMetadata(audioFile.name, AUDIO_FOLDER_ID);
+      await driveUploadContent(fileMeta.id, audioFile);
+      const fileInfo = await driveGetFile(fileMeta.id, 'webViewLink');
+      audioLink = fileInfo.webViewLink || '';
+    }
 
     statusEl.textContent = 'Saving grade…';
     // Captured once here rather than read again later: the tab can be switched
@@ -2212,7 +2232,7 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
       graderName,
       manualGradeText,
       document.getElementById('g-feedback').value,
-      fileInfo.webViewLink || ''
+      audioLink
     ];
     await sheetsAppend(GRADING_SHEET_ID, 'A1:G1', row);
 
@@ -2234,7 +2254,9 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
       }
     }
 
-    statusEl.textContent = 'Submitted — thanks!' + certNote;
+    // Says plainly that no AI grade is coming, rather than leaving someone
+    // waiting on a result that was never going to arrive.
+    statusEl.textContent = (audioFile ? 'Submitted — thanks!' : 'Grade saved — no recording, so there is no AI grade for this one.') + certNote;
     statusEl.className = 'ok';
     document.getElementById('grading-form').reset();
     // form.reset() restores values/checked state but not the disabled flag
@@ -2250,15 +2272,18 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     // Kick off AI grading in the background — this form only has one name field
     // (the person being observed/trained), so it's used for both traineeName and
     // regionalManagerName since both rubrics are really grading that same person's
-    // performance during the session.
-    gradeSessionWithAI({
-      sessionType,
-      traineeName,
-      regionalManagerName: traineeName,
-      graderName,
-      date: new Date().toISOString().slice(0, 10),
-      audioFileId: fileMeta.id
-    });
+    // performance during the session. Nothing to send without a recording:
+    // the AI grades the audio, so a manual-only entry just stops here.
+    if (fileMeta) {
+      gradeSessionWithAI({
+        sessionType,
+        traineeName,
+        regionalManagerName: traineeName,
+        graderName,
+        date: new Date().toISOString().slice(0, 10),
+        audioFileId: fileMeta.id
+      });
+    }
   } catch (err) {
     statusEl.textContent = 'Something went wrong: ' + err.message;
     statusEl.className = 'err';
