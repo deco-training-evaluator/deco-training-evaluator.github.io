@@ -922,6 +922,23 @@
      on the sunken panel these sit on. */
   .field-inline-new { margin-top: 8px; }
   .field-hint { font-size: 11.5px; color: var(--text-secondary); margin-top: 6px; line-height: 1.45; }
+  /* What the chosen recording is about to cost, shown BEFORE Submit — same
+     reasoning as .cert-preview: the moment to find out a 4-hour file is a $2.40
+     grading run is while it can still be reconsidered, not afterwards. The
+     figures are estimates and the copy says so. */
+  .audio-plan {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--sunken);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+  }
+  .audio-plan strong { color: var(--text-primary); font-weight: 650; }
+  .audio-plan .audio-plan-line { display: block; }
+  .audio-plan .audio-plan-saving { color: color-mix(in srgb, var(--good) 82%, var(--text-primary)); font-weight: 600; }
   .radio-row { display: flex; gap: 16px; }
   .radio-row label { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; }
   .check-row {
@@ -1813,6 +1830,19 @@
     .ai-correction-line { grid-template-columns: 1fr; gap: 1px; }
   }
   .ai-note { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin: 6px 0 0; }
+  /* "This grade came from reading, not listening." Given a tinted seat rather
+     than left as another grey line, because it changes how the whole card
+     should be read — but deliberately NOT an .alert-bar: nothing is wrong and
+     nothing needs doing, so it must not compete with the verdict above it. */
+  .transcript-note {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface-1));
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  .transcript-note strong { color: color-mix(in srgb, var(--accent) 78%, var(--text-primary)); }
+  .transcript-note a { color: color-mix(in srgb, var(--accent) 78%, var(--text-primary)); font-weight: 600; white-space: nowrap; }
   /* Reviewer notes arrive as one long run-on line (Gemini's note plus the
      machine-appended flags, joined with " | "). Rendered as separate bullets
      so each thing to check is its own item instead of a paragraph. */
@@ -2233,6 +2263,19 @@
           <div class="field">
             <label for="g-audio">Audio recording <span class="field-optional">(optional — this is what the AI grades; without it you're just recording a manual grade)</span></label>
             <input id="g-audio" type="file" accept="audio/*">
+            <!-- Filled in by describeChosenRecording() once the browser has read
+                 the file's duration. Hidden until there is a file, because an
+                 empty cost line under an empty picker is just noise. -->
+            <div id="g-audio-plan" class="audio-plan hidden"></div>
+          </div>
+          <div class="field" id="g-medium-field">
+            <label for="g-medium">How the AI should read it</label>
+            <select id="g-medium">
+              <option value="auto" selected>Choose for me (recommended)</option>
+              <option value="transcript">Write it out first, then grade the text — cheaper</option>
+              <option value="audio">Listen to the recording directly</option>
+            </select>
+            <div class="field-hint" id="g-medium-hint"></div>
           </div>
           <div>
             <button type="submit" class="btn" id="grade-submit-btn">Upload &amp; Submit Grade</button>
@@ -2993,6 +3036,10 @@ function resetGradingPanel() {
   // box showing, so it's told to catch up.
   syncGraderOtherField(false);
   renderCertPreview();
+  // reset() empties the file input silently, so the cost line for a file that
+  // is no longer chosen has to be cleared by hand.
+  audioPlan = null;
+  describeChosenRecording();
   prereqOverride = null;
   prereqBlockedSubmit = false;
   renderPrereqGate();
@@ -3342,7 +3389,7 @@ async function renderPersonSessions(name, container) {
         box.classList.remove('hidden');
         if (!rendered) {
           rendered = true;
-          renderAiGradingResult(result, box, driveFileIdFromLink(audioLinkOf(s.audioLink)));
+          renderAiGradingResult(result, box, driveFileIdFromLink(audioLinkOf(s.audioLink)), s.transcriptLink);
         }
       }
     });
@@ -4304,9 +4351,16 @@ populateGraderDropdown();
    follow-up state. */
 const MANUAL_SECTIONS_IDX = 22;                    // W
 const MANUAL_SECTIONS_HEADER = 'All Sections 6+';
+// Column X, and the one column out here that Code.gs writes rather than this
+// file — it's the backend that knows where the transcript ended up. It sits
+// past T/U/V/W so it collides with nothing this page owns. See the V16 note in
+// Code.gs.
+const TRANSCRIPT_LINK_IDX = 23;                    // X
 // Every range that reads or clears a Grading Log row has to reach this far, or
 // a delete leaves a stray Yes behind and a read comes back without the tick.
-const GRADING_LOG_LAST_COLUMN = 'W';
+// Moved W -> X in V16: stopping at W would strand a transcript link pointing at
+// a session that no longer exists.
+const GRADING_LOG_LAST_COLUMN = 'X';
 
 // Both halves of the Smartsheet formula, or nothing.
 function manualGradeCertifies(sessionType, rawGrade, everySectionPassed) {
@@ -4608,6 +4662,10 @@ function renderPrereqGate({ alarm = false } = {}) {
   el.addEventListener('change', renderCertPreview);
 });
 document.getElementById('g-trainee').addEventListener('change', () => renderPrereqGate());
+// V16: what the AI is about to do with the recording, and what it'll cost,
+// while the form can still be changed. Same reasoning as renderCertPreview.
+document.getElementById('g-audio').addEventListener('change', onAudioFileChosen);
+document.getElementById('g-medium').addEventListener('change', onMediumChoiceChanged);
 
 document.getElementById('grading-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -4699,6 +4757,10 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     // while the ~3-minute AI grade runs, and this submission must stay stamped
     // with the session type it was actually started under.
     const sessionType = currentSessionType;
+    // Captured here for the same reason as sessionType: the form is reset a few
+    // lines below, while the grading run this describes is still minutes away
+    // from starting.
+    const plan = audioPlan;
     const traineeName = document.getElementById('g-trainee').value;
     const gradeMax = SESSION_MAX_POSSIBLE[sessionType] || 110;
     const manualGradeText = rawGradeVal !== '' ? `${rawGradeVal}/${gradeMax}` : '';
@@ -4761,6 +4823,10 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     // Same as resetGradingPanel: reset() clears the picker but not the box it
     // revealed, so a typed name can't be left over the next submission.
     syncGraderOtherField(false);
+    // reset() empties the file input without firing 'change', so the cost line
+    // for the recording just submitted would otherwise sit over an empty form.
+    audioPlan = null;
+    describeChosenRecording();
     renderCertPreview();
     // The form is empty again, so an override granted for the person who was in
     // it must not still be standing for whoever is picked next.
@@ -4784,7 +4850,11 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
         audioFileId: fileMeta.id,
         // Only used to size the progress estimate — a 131 MB session and a
         // 1.4 MB clip should not be quoted the same wait.
-        audioBytes: audioFile.size
+        audioBytes: audioFile.size,
+        // V16. Decided at file-select from the recording's own length, or
+        // overridden by the picker; see resolveMedium.
+        medium: (plan && plan.medium) || 'audio',
+        audioSeconds: (plan && plan.seconds) || 0
       });
     }
   } catch (err) {
@@ -4844,6 +4914,202 @@ async function driveWaitForSize(fileId, expectedBytes, attempts = 10) {
   return seen;
 }
 
+/* ------------- Which way to grade a recording (V16) -------------
+   The AI can either LISTEN to the session or READ a transcript of it. Neither
+   is right for every recording, so this decides — and, more importantly, says
+   what it decided and what it's about to cost, while there's still time to
+   change it.
+
+   The short version of the trade:
+     - Listening is what every measurement in this project so far rests on, and
+       it's the only way tone and pace reach the grade at all. On a short clip
+       it's also no more expensive, because the cost is dominated by the three
+       gradings, not by the audio.
+     - Reading a transcript costs about 40% less on a long session, and roughly
+       ONE EIGHTH on every re-grade after the first, because the audio never has
+       to be read again. It also turns three long risky calls into one, which is
+       what makes a 4h33m recording gradable inside Google's 6-minute limit.
+
+   So: short clips listen, long recordings read, and the picker overrides both. */
+
+// Above this, transcribing first starts winning on cost and on the 6-minute
+// limit. Below it the saving is pennies and isn't worth losing tone over.
+const TRANSCRIPT_PREFERRED_SECONDS = 30 * 60;
+
+// Same numbers Google charges, so the estimate on screen is arithmetic rather
+// than a guess: gemini-3.5-flash at $1.50/$9.00 per million in/out, audio
+// tokenised at 32/second. Output is capped at 65,536 tokens per response, which
+// is what sets TRANSCRIPT_TOKENS_PER_SECOND's practical ceiling below.
+const PRICE_IN_PER_MTOK = 1.50;
+const PRICE_OUT_PER_MTOK = 9.00;
+const AUDIO_TOKENS_PER_SECOND = 32;
+const GRADING_PASS_COUNT = 3;
+const GRADING_OUTPUT_TOKENS = 3500;   // one grading pass's JSON, measured off live rows
+// A training day is not wall-to-wall talking. ~150 words/minute of actual
+// speech, ~1.33 tokens/word, and roughly two-thirds of the clock carrying
+// speech at all, gives ~2.2 tokens of transcript per second of recording.
+// A guess, and the estimate is labelled as one.
+const TRANSCRIPT_TOKENS_PER_SECOND = 2.2;
+// Gemini 3.5 Flash writes at most 65,536 tokens in one answer. Past roughly
+// this much recording, the transcript needs more than one pass to finish — it
+// still works (the backend says where it stopped and the page asks for the
+// rest) but each extra pass re-reads the audio, so the saving shrinks.
+const TRANSCRIPT_ONE_PASS_SECONDS = 65536 / TRANSCRIPT_TOKENS_PER_SECOND;
+// How many times the page will ask for "the rest of it" before giving up.
+const MAX_TRANSCRIBE_CALLS = 6;
+
+function estimateGradingCost(seconds) {
+  const audioTokens = Math.max(0, seconds || 0) * AUDIO_TOKENS_PER_SECOND;
+  const transcriptTokens = Math.max(0, seconds || 0) * TRANSCRIPT_TOKENS_PER_SECOND;
+  const gradingOut = GRADING_PASS_COUNT * GRADING_OUTPUT_TOKENS;
+  const perM = (tokens, rate) => (tokens / 1e6) * rate;
+
+  const audio = perM(audioTokens * GRADING_PASS_COUNT, PRICE_IN_PER_MTOK) + perM(gradingOut, PRICE_OUT_PER_MTOK);
+  const transcribing = perM(audioTokens, PRICE_IN_PER_MTOK) + perM(transcriptTokens, PRICE_OUT_PER_MTOK);
+  const gradingText = perM(transcriptTokens * GRADING_PASS_COUNT, PRICE_IN_PER_MTOK) + perM(gradingOut, PRICE_OUT_PER_MTOK);
+
+  return {
+    audio: audio,                        // listen, three times
+    transcript: transcribing + gradingText,  // write it out once, then read it three times
+    regrade: gradingText                 // every grading after the first
+  };
+}
+
+function formatMoney(dollars) {
+  if (!(dollars > 0)) return '$0.00';
+  return dollars < 0.10 ? `$${dollars.toFixed(3)}` : `$${dollars.toFixed(2)}`;
+}
+
+function formatDurationWords(seconds) {
+  const s = Math.round(seconds || 0);
+  if (!s) return '';
+  const h = Math.floor(s / 3600);
+  const m = Math.round((s % 3600) / 60);
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${Math.max(1, m)} min`;
+}
+
+// Reads how long the chosen file actually is, without uploading it anywhere.
+// Never throws and never hangs the form: an unreadable duration resolves to 0,
+// and everything downstream falls back to file size instead.
+function readAudioDuration(file) {
+  return new Promise(resolve => {
+    let settled = false;
+    const url = URL.createObjectURL(file);
+    const el = document.createElement('audio');
+    const finish = seconds => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      resolve(Number.isFinite(seconds) && seconds > 0 ? seconds : 0);
+    };
+    el.preload = 'metadata';
+    el.onloadedmetadata = () => finish(el.duration);
+    el.onerror = () => finish(0);
+    // Some containers report Infinity until they're seeked; some never load at
+    // all. Either way the form must not sit there waiting on it.
+    setTimeout(() => finish(0), 15000);
+    el.src = url;
+  });
+}
+
+// What the currently-selected file and picker add up to. Null when no file is
+// chosen, which is also what tells the submit handler there's nothing to plan.
+let audioPlan = null;
+
+function resolveMedium(choice, seconds, bytes) {
+  if (choice === 'transcript' || choice === 'audio') return choice;
+  // Auto. Duration decides when we have it; when we don't, fall back to size —
+  // anything over the backend's inline limit is a real session, not a clip.
+  if (seconds > 0) return seconds >= TRANSCRIPT_PREFERRED_SECONDS ? 'transcript' : 'audio';
+  return bytes > 14 * 1024 * 1024 ? 'transcript' : 'audio';
+}
+
+function describeChosenRecording() {
+  const box = document.getElementById('g-audio-plan');
+  const hint = document.getElementById('g-medium-hint');
+  const field = document.getElementById('g-medium-field');
+  if (!box) return;
+
+  if (!audioPlan) {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    if (field) field.classList.add('hidden');
+    if (hint) hint.textContent = '';
+    return;
+  }
+  if (field) field.classList.remove('hidden');
+
+  const { seconds, bytes, medium, choice } = audioPlan;
+  const cost = estimateGradingCost(seconds);
+  const mb = Math.max(1, Math.round(bytes / (1024 * 1024)));
+  const lengthText = seconds > 0 ? formatDurationWords(seconds) : `${mb} MB`;
+
+  const lines = [];
+  lines.push(`<span class="audio-plan-line"><strong>${escapeHtml(lengthText)}</strong> recording${seconds > 0 ? ` · ${mb} MB` : ''}.</span>`);
+
+  if (medium === 'transcript') {
+    lines.push(`<span class="audio-plan-line">The AI will <strong>write out what was said first</strong>, then grade that. `
+      + `Roughly <strong>${escapeHtml(formatMoney(cost.transcript))}</strong> this time`
+      + (seconds > 0 ? `, versus about ${escapeHtml(formatMoney(cost.audio))} if it listened straight through` : '')
+      + `.</span>`);
+    if (seconds > 0 && cost.regrade < cost.audio) {
+      lines.push(`<span class="audio-plan-line audio-plan-saving">Grading this session again later costs about ${escapeHtml(formatMoney(cost.regrade))}, because the recording never has to be read a second time.</span>`);
+    }
+    lines.push(`<span class="audio-plan-line">Trade-off: a transcript can't carry tone, so pace and confidence are judged only from the notes the AI writes down while it listens.</span>`);
+    if (seconds > TRANSCRIPT_ONE_PASS_SECONDS) {
+      lines.push(`<span class="audio-plan-line">This one is long enough that writing it out will take more than one pass. That works, but each extra pass re-reads the audio, so the saving is smaller than the figure above.</span>`);
+    }
+  } else {
+    lines.push(`<span class="audio-plan-line">The AI will <strong>listen to the recording directly</strong>. Roughly <strong>${escapeHtml(formatMoney(cost.audio))}</strong>.</span>`);
+    if (seconds > 0 && seconds < TRANSCRIPT_PREFERRED_SECONDS && choice === 'auto') {
+      lines.push(`<span class="audio-plan-line">Short enough that writing it out first would save about ${escapeHtml(formatMoney(Math.max(0, cost.audio - cost.transcript)))} and cost you tone — so this is the better way round.</span>`);
+    }
+    if (seconds >= TRANSCRIPT_PREFERRED_SECONDS) {
+      lines.push(`<span class="audio-plan-line">On a recording this long, listening is three long calls in one go and may run past Google's 6-minute limit. Writing it out first is the safer route.</span>`);
+    }
+  }
+  lines.push(`<span class="audio-plan-line">Estimates, not a quote — actual cost depends on how much talking is on the recording.</span>`);
+  box.innerHTML = lines.join('');
+  box.classList.remove('hidden');
+
+  if (hint) {
+    hint.textContent = choice === 'auto'
+      ? (medium === 'transcript'
+          ? 'Chosen because this recording is over 30 minutes.'
+          : 'Chosen because this recording is under 30 minutes, where listening costs the same and keeps tone.')
+      : '';
+  }
+}
+
+async function onAudioFileChosen() {
+  const file = document.getElementById('g-audio').files[0];
+  const choice = (document.getElementById('g-medium') || {}).value || 'auto';
+  if (!file) { audioPlan = null; describeChosenRecording(); return; }
+
+  // Show what we know immediately, then fill the duration in when it arrives —
+  // reading metadata off a 131 MB file is not instant.
+  audioPlan = { file, bytes: file.size, seconds: 0, choice, medium: resolveMedium(choice, 0, file.size) };
+  describeChosenRecording();
+
+  const seconds = await readAudioDuration(file);
+  // The picker may have moved on, or the file been cleared, while we waited.
+  const stillSame = audioPlan && audioPlan.file === file;
+  if (!stillSame) return;
+  audioPlan.seconds = seconds;
+  audioPlan.medium = resolveMedium(audioPlan.choice, seconds, file.size);
+  describeChosenRecording();
+}
+
+function onMediumChoiceChanged() {
+  const choice = document.getElementById('g-medium').value;
+  if (!audioPlan) return;
+  audioPlan.choice = choice;
+  audioPlan.medium = resolveMedium(choice, audioPlan.seconds, audioPlan.bytes);
+  describeChosenRecording();
+}
+
 /* ---------------------- AI grading ---------------------- */
 // There is still no real progress feed to poll — each Apps Script call is one
 // blocking request that only answers when it's finished — so a literal "live %"
@@ -4872,10 +5138,26 @@ function formatElapsed(totalSeconds) {
 // actually run — which is exactly why the bar never claims 100% before the
 // result lands and why the elapsed counter sits underneath it. The elapsed
 // counter is the honest part; the bar is the reassuring part.
-function estimatedPhaseSeconds(audioBytes) {
+function estimatedPhaseSeconds(audioBytes, medium, audioSeconds) {
   const mb = Math.max(1, (audioBytes || 0) / (1024 * 1024));
+  const seconds = Math.max(0, audioSeconds || 0);
+  if (medium === 'transcript') {
+    return {
+      upload: Math.round(Math.min(300, 10 + mb * 0.8)),
+      // Writing the transcript is output-bound, not input-bound: roughly
+      // TRANSCRIPT_TOKENS_PER_SECOND of transcript per second of recording, at
+      // a few hundred tokens a second. Capped at 5½ minutes because past that
+      // the call is going to hit Google's wall anyway and the estimate stops
+      // being the useful part.
+      transcribe: Math.round(Math.min(330, 45 + seconds * 0.012)),
+      // Three passes over ~40k tokens of text, fired together. Seconds, not
+      // minutes — this is the phase the whole change exists to make cheap.
+      grade: 45
+    };
+  }
   return {
     upload: Math.round(Math.min(300, 10 + mb * 0.8)),
+    transcribe: 0,
     grade: Math.round(Math.min(600, 60 + mb * 1.4))
   };
 }
@@ -4886,13 +5168,18 @@ function estimatedPhaseSeconds(audioBytes) {
 // "AI grading request failed: Unexpected token '<'", which says nothing useful
 // about a recording being too long. This turns the single most likely failure
 // on a long session into a sentence that names the cause.
-function describeGradingTransportFailure(rawText, elapsedSeconds) {
+function describeGradingTransportFailure(rawText, elapsedSeconds, phase) {
   const looksLikeHtml = /^\s*<!?\w/.test(rawText || '');
   const nearTheWall = elapsedSeconds >= 240;   // Apps Script's wall is 360s
+  if (looksLikeHtml && nearTheWall && phase === 'transcribe') {
+    return 'Writing out the recording ran past the 6-minute limit Google puts on this kind of script, so it was cut off. '
+      + 'Nothing was lost — the recording is safely in Drive and no grade was written. '
+      + 'Submitting it again will start over, and the cost of this attempt is spent either way.';
+  }
   if (looksLikeHtml && nearTheWall) {
     return 'The grading step ran past the 6-minute limit Google puts on this kind of script, so it was cut off. '
       + 'The recording did reach the AI — it is the grading pass that ran out of time. '
-      + 'A shorter recording will go through; a fix for full-length sessions needs the three passes split across separate calls.';
+      + 'On a long recording, choosing "Write it out first, then grade the text" avoids this: it turns three long calls into one.';
   }
   if (looksLikeHtml) {
     return 'The grading service answered with a web page instead of a result, which usually means the script errored out. '
@@ -4923,11 +5210,19 @@ function sizeLooksUnsettled(prepared, audioBytes) {
   return audioBytes > INLINE_AUDIO_LIMIT_BYTES;
 }
 
-async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerName, graderName, date, audioFileId, audioBytes }) {
+async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerName, graderName, date, audioFileId, audioBytes, medium, audioSeconds }) {
   const statusEl = document.getElementById('aiGradingStatus');
   let progressTimer = null;
   const startedAt = Date.now();
-  const estimates = estimatedPhaseSeconds(audioBytes);
+  // Not const: a backend older than V16 has no transcription step, and the run
+  // drops back to listening rather than failing. Everything that reads the
+  // medium after that point has to read the CURRENT value, not the requested
+  // one — including the progress labels and the phase slices.
+  let activeMedium = medium === 'transcript' ? 'transcript' : 'audio';
+  let estimates = estimatedPhaseSeconds(audioBytes, activeMedium, audioSeconds);
+  // Only used by the progress label, to say what it's picking up from rather
+  // than looking like it restarted.
+  let transcribeResumeFrom = 0;
 
   // V15: grading is two round trips now, because Apps Script's 6-minute limit
   // is per CALL. Phase 1 gets the recording somewhere Gemini can read it,
@@ -4959,21 +5254,45 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
     const inPhase = (Date.now() - phaseStartedAt) / 1000;
 
     // Each phase owns a slice of the bar, so it always moves forward: the
-    // handover from uploading to grading must never look like a reset.
+    // handover from one step to the next must never look like a reset. The
+    // slices differ by medium because transcribing adds a step — a bar that
+    // reached 35% and then re-labelled itself "Step 2 of 3" would read as one.
+    const steps = activeMedium === 'transcript' ? 3 : 2;
+    const slice = activeMedium === 'transcript'
+      ? { upload: 18, processing: 6, transcribe: 48, grade: 25 }
+      : { upload: 28, processing: 7, transcribe: 0, grade: 57 };
+    const startsAt = {
+      upload: 0,
+      processing: slice.upload,
+      transcribe: slice.upload + slice.processing,
+      grade: slice.upload + slice.processing + slice.transcribe
+    };
+
     let pct;
     let label;
     if (phase === 'upload') {
-      pct = Math.min(28, (inPhase / estimates.upload) * 28);
-      label = `Step 1 of 2 — sending the recording to the AI. About ${formatElapsed(estimates.upload)} for a file this size (an estimate, not a live progress feed).`;
+      pct = Math.min(slice.upload, (inPhase / estimates.upload) * slice.upload);
+      label = `Step 1 of ${steps} — sending the recording to the AI. About ${formatElapsed(estimates.upload)} for a file this size (an estimate, not a live progress feed).`;
     } else if (phase === 'processing') {
-      pct = 28 + Math.min(7, (inPhase / 60) * 7);
-      label = 'Step 1 of 2 — the AI is unpacking the recording. This can take a minute on a long session.';
+      pct = startsAt.processing + Math.min(slice.processing, (inPhase / 60) * slice.processing);
+      label = `Step 1 of ${steps} — the AI is unpacking the recording. This can take a minute on a long session.`;
+    } else if (phase === 'transcribe') {
+      pct = startsAt.transcribe + Math.min(slice.transcribe, (inPhase / estimates.transcribe) * slice.transcribe);
+      const resumed = transcribeResumeFrom > 0
+        ? ` Picking up from ${formatElapsed(transcribeResumeFrom)} — a recording this long takes more than one pass.`
+        : '';
+      label = (inPhase <= estimates.transcribe
+        ? `Step 2 of 3 — writing out what was said, with timestamps. About ${formatElapsed(estimates.transcribe)} for a recording this length (an estimate, not a live progress feed).`
+        : `Step 2 of 3 — still writing it out. This one is past the expected ${formatElapsed(estimates.transcribe)}. Hang tight.`) + resumed;
     } else {
-      const gradePct = Math.min(57, (inPhase / estimates.grade) * 57);
-      pct = 35 + gradePct;
-      label = inPhase <= estimates.grade
-        ? `Step 2 of 2 — grading. Usually about ${formatElapsed(estimates.grade)} for a recording this length (an estimate, not a live progress feed).`
-        : `Step 2 of 2 — still grading. This one is past the expected ${formatElapsed(estimates.grade)}. Hang tight.`;
+      pct = startsAt.grade + Math.min(slice.grade, (inPhase / estimates.grade) * slice.grade);
+      label = activeMedium === 'transcript'
+        ? (inPhase <= estimates.grade
+            ? 'Step 3 of 3 — grading the transcript. This part is quick.'
+            : 'Step 3 of 3 — still grading the transcript. Hang tight.')
+        : (inPhase <= estimates.grade
+            ? `Step 2 of 2 — grading. Usually about ${formatElapsed(estimates.grade)} for a recording this length (an estimate, not a live progress feed).`
+            : `Step 2 of 2 — still grading. This one is past the expected ${formatElapsed(estimates.grade)}. Hang tight.`);
     }
     // Past every estimate, creep instead of stalling, and never claim 100%
     // until the real result is actually in hand.
@@ -5010,7 +5329,7 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
       return JSON.parse(raw);
     } catch (err) {
       console.error('Grading endpoint returned something that is not JSON:', raw.slice(0, 2000));
-      const explained = describeGradingTransportFailure(raw, (Date.now() - phaseStartedAt) / 1000);
+      const explained = describeGradingTransportFailure(raw, (Date.now() - phaseStartedAt) / 1000, phase);
       throw new Error(explained || ('The grading service sent back something unreadable (' + err.message + ').'));
     }
   }
@@ -5081,18 +5400,87 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
       }
     }
 
-    // ---- Phase 2: grade it -----------------------------------------------
+    // ---- Phase 2 (transcript only): write the session out ------------------
+    // One call if it fits. Gemini can only write ~65k tokens in one answer, and
+    // an execution only gets 6 minutes, so a long enough recording stops short —
+    // the backend then reports where it got to and this asks for the rest, each
+    // ask getting a fresh budget. Every extra pass re-reads the audio (Gemini
+    // has no way to bill part of a file), so this is a safety net, not a plan.
+    let transcriptFileId = '';
+    let transcriptUrl = '';
+    if (activeMedium === 'transcript' && !backendIsPreV15) {
+      setPhase('transcribe');
+      let fromSeconds = 0;
+      let complete = false;
+
+      for (let attempt = 1; attempt <= MAX_TRANSCRIBE_CALLS && !complete; attempt++) {
+        const written = await callGrader({
+          action: 'transcribe',
+          audioFileId,
+          geminiFileUri,
+          audioMimeType,
+          transcriptFileId,     // blank on the first pass; appends on the rest
+          fromSeconds,
+          traineeName,
+          regionalManagerName   // so the transcript can label who is who
+        });
+
+        // A V15 backend has never heard of this action, reads it as a grade
+        // request with no sessionType, and says so — the same signature the
+        // pre-V15 check above uses, for the same reason. Fall back to listening
+        // rather than failing: the two halves ship by different routes and a
+        // page newer than the script is a window that WILL happen.
+        if (!written.ok && /sessionType must be/.test(written.error || '')) {
+          console.warn('Grading backend is older than V16 — no transcription step. Falling back to grading the audio directly.');
+          activeMedium = 'audio';
+          estimates = estimatedPhaseSeconds(audioBytes, 'audio', audioSeconds);
+          break;
+        }
+        if (!written.ok) throw new Error(written.error || 'Writing out the recording failed.');
+
+        // Held onto before anything can throw: the transcript is already saved
+        // in Drive at this point and has already been paid for, so its id must
+        // survive a later failure rather than being lost with the run.
+        transcriptFileId = written.transcriptFileId || transcriptFileId;
+        transcriptUrl = written.transcriptUrl || transcriptUrl;
+        complete = !!written.complete;
+
+        if (!complete) {
+          if (!written.canResume) {
+            throw new Error('The AI stopped part-way through writing out this recording and could not tell where it got to. '
+              + 'The part it did write is saved in Drive next to the recording. '
+              + 'Grading this session by listening to the audio directly is the way through — choose that on the form and submit again.');
+          }
+          fromSeconds = written.resumeFromSeconds;
+          transcribeResumeFrom = fromSeconds;
+          setPhase('transcribe');   // fresh slice of the estimate for the new pass
+        }
+      }
+
+      if (activeMedium === 'transcript' && !complete) {
+        throw new Error('This recording needed more than ' + MAX_TRANSCRIBE_CALLS + ' passes to write out and still is not finished. '
+          + 'What was written is saved in Drive next to the recording. A recording this long is better split into parts and graded separately.');
+      }
+    }
+
+    // ---- Phase 3: grade it -------------------------------------------------
     setPhase('grade');
-    const result = await callGrader({
+    const gradingFromTranscript = activeMedium === 'transcript' && !!transcriptFileId;
+    const result = await callGrader(Object.assign({
       sessionType,          // "Team On-Site Day" or "Training Day"
       traineeName,          // Site Operator(s) being observed
       regionalManagerName,  // RM/trainer being graded
       graderName,           // whoever is submitting this grade
       date,                 // "YYYY-MM-DD"
-      audioFileId,          // still required — column G's Drive link is built from it
-      geminiFileUri,        // empty for a short clip, which keeps the old inline path
-      audioMimeType
-    });
+      audioFileId           // still required — column G's Drive link is built from it
+    }, gradingFromTranscript
+      // The session travels as text; there is no audio part at all. Sending the
+      // URI too would be harmless but reads as if either could be used.
+      ? { transcriptFileId, transcriptUrl }
+      : {
+          geminiFileUri,    // empty for a short clip, which keeps the old inline path
+          audioMimeType
+        }));
     stopProgress();
     finish();
 
@@ -5121,7 +5509,7 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
         `<div class="ai-progress-bar"><div class="ai-progress-fill" style="width:100%"></div></div>` +
         `<div class="ai-progress-elapsed">Took ${formatElapsed(totalElapsed)}.</div>`;
     }
-    renderAiGradingResult(result, undefined, audioFileId);
+    renderAiGradingResult(result, undefined, audioFileId, transcriptUrl);
     return result;
   } catch (err) {
     stopProgress();
@@ -5737,7 +6125,28 @@ function verdictHero(result, maxPossible) {
 // turns each section's cited timestamps into clickable jump points. Optional
 // on purpose: results graded before evidence timestamps existed, and rows with
 // no usable audio link, still render exactly as they did before.
-function renderAiGradingResult(result, container, audioFileId) {
+// Says out loud that this grade came from reading rather than listening, and
+// links the transcript so the exact evidence the AI worked from can be read.
+// Not optional politeness: a transcript-graded session and an audio-graded one
+// are different evidence, and nothing else on the card distinguishes them.
+//
+// Two ways to know. A freshly graded session carries graded_from from Code.gs;
+// one re-opened from the Grading Log doesn't (it isn't in the raw JSON), so the
+// transcript link in column X is what gives it away.
+function transcriptNotice(result, transcriptLink) {
+  const link = audioLinkOf(transcriptLink);
+  if ((result || {}).graded_from !== 'transcript' && !link) return '';
+  return `<p class="ai-note transcript-note">
+    <strong>Graded from the written transcript, not the audio.</strong>
+    The AI wrote the session out first — with timestamps — and then scored that text.
+    It costs much less, and grading this session again later is cheaper still.
+    What it can't do is hear: pace and confidence were judged only from the notes
+    it made while listening, so treat anything tone-related on this card with care.
+    ${link ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener">Read the transcript</a>` : ''}
+  </p>`;
+}
+
+function renderAiGradingResult(result, container, audioFileId, transcriptLink) {
   container = container || document.getElementById('aiGradingResult');
   if (!container) return;
 
@@ -5864,6 +6273,7 @@ function renderAiGradingResult(result, container, audioFileId) {
 
   container.innerHTML = `
     ${verdictHero(result, maxPossible)}
+    ${transcriptNotice(result, transcriptLink)}
     ${audioBlock}
     <div class="ai-section-list">${sectionItems}</div>
     ${sectionFootnotes}
@@ -6389,6 +6799,9 @@ async function fetchSubmissions() {
       // "unknown", not a "no" (see manualCertifiedCell).
       sectionsAllPass: manual ? (manual.r[MANUAL_SECTIONS_IDX] || '') : '',
       audioLink: base[6],
+      // Written by Code.gs onto the AI row, so read it from there — a manual row
+      // never has one. Blank on every session graded before V16.
+      transcriptLink: (ai && ai.r[TRANSCRIPT_LINK_IDX]) || '',
       aiRow: ai ? ai.r : null,
       // Follow-up state is written onto the AI row, because that's the row
       // carrying the score that put the session on the list in the first place.
@@ -6404,6 +6817,7 @@ async function fetchSubmissions() {
       manualGrade: r[7] === 'AI' ? '' : r[4],
       sectionsAllPass: r[7] === 'AI' ? '' : (r[MANUAL_SECTIONS_IDX] || ''),
       audioLink: r[6],
+      transcriptLink: r[7] === 'AI' ? (r[TRANSCRIPT_LINK_IDX] || '') : '',
       aiRow: r[7] === 'AI' ? r : null,
       aiRowNumber: r[7] === 'AI' ? rowNumber : null
     });
@@ -6497,7 +6911,7 @@ async function loadRecentLog() {
             // The audio link in column G is the only place a logged row records
             // which recording it came from — pull the Drive ID back out of it so
             // this row's timestamps are clickable too, not just a fresh result's.
-            renderAiGradingResult(aiResult, document.getElementById(`log-detail-${i}`), driveFileIdFromLink(audioLinkOf(s.audioLink)));
+            renderAiGradingResult(aiResult, document.getElementById(`log-detail-${i}`), driveFileIdFromLink(audioLinkOf(s.audioLink)), s.transcriptLink);
             rendered = true;
           }
         }
@@ -6880,7 +7294,7 @@ function renderFollowUps() {
         headerRow.classList.add('open');
         detailRow.classList.remove('hidden');
         if (!rendered) {
-          renderAiGradingResult(item.result, document.getElementById(`fu-detail-${i}`), driveFileIdFromLink(audioLinkOf(item.sub.audioLink)));
+          renderAiGradingResult(item.result, document.getElementById(`fu-detail-${i}`), driveFileIdFromLink(audioLinkOf(item.sub.audioLink)), item.sub.transcriptLink);
           rendered = true;
         }
       }
