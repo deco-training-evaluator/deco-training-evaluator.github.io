@@ -676,6 +676,39 @@
      not dressed up as buttons. */
   .clip-chip.is-static { cursor: default; border-style: dashed; }
   .clip-chip.is-static:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  /* Two or more of the passes independently pointed at this same moment.
+     mergeClips has always counted that (it ranks by it when a section is over
+     the 3-clip cap) and then dropped it before rendering — so a moment all 3
+     passes flagged looked identical to one a single pass mentioned. Same gap
+     the "3 passes: 9 · 6 · 3" line was added to close for scores. */
+  .clip-chip.is-corroborated {
+    border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+  .clip-runs { font-size: 9.5px; font-weight: 700; margin-left: 4px; opacity: 0.85; }
+  /* More than one moment in a section: the times on their own stop being enough
+     to choose between — "00:34  02:15  07:41" gives a manager nothing to pick
+     from without hovering all three — so each gets its quote and they stack.
+     A single clip keeps the old compact chip: there is nothing to tell apart,
+     and 11 sections each growing two lines is real bloat on a card that was
+     deliberately tightened. The 158px score column is why the quote is cut to
+     a few words rather than shown whole. */
+  .ai-clips.is-multi .ai-clip-row { flex-direction: column; gap: 7px; }
+  .ai-clip-line { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+  .ai-clip-quote {
+    font-size: 11px;
+    line-height: 1.4;
+    font-style: italic;
+    color: var(--text-muted);
+    overflow-wrap: break-word;
+    /* Hard stop at two lines. The word cap alone doesn't bound the height —
+       five long words still wrap to three lines in a 158px column — and this
+       block repeats up to 3 times per section across 11 sections. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
   /* The three consensus passes' individual scores. "Double-check" on its own
      can't distinguish 8·8·5 (one outlier) from 9·6·3 (no real signal), and
      those deserve very different amounts of a manager's attention. */
@@ -736,6 +769,66 @@
   .ai-callout-item { margin: 0 0 7px; }
   .ai-callout-item:last-child { margin-bottom: 0; }
   .ai-callout-item strong { color: var(--text-primary); }
+  /* Corrections — the fix-list for the rest of the session. Given a full-width
+     block of its own rather than a fourth callout column: it's a to-do list
+     somebody works down while standing next to the Site Operator, not a summary
+     to skim, and each row carries two lines plus a jump point that wouldn't
+     survive a 220px column. The accent edge marks it as the one thing on this
+     card that's an instruction rather than an observation. */
+  .ai-corrections {
+    padding: 14px 16px;
+    border-radius: 8px;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--brand-orange);
+    margin-bottom: 14px;
+  }
+  .ai-corrections .ai-callout-label { color: var(--brand-orange); }
+  .ai-corrections-intro {
+    margin: 0 0 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
+  .ai-correction { padding: 10px 0; border-top: 1px solid var(--gridline); }
+  .ai-correction:first-of-type { padding-top: 0; border-top: none; }
+  .ai-correction:last-child { padding-bottom: 0; }
+  .ai-correction-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .ai-correction-section { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+  .ai-correction-nowhere { font-size: 11px; font-style: italic; color: var(--text-muted); }
+  /* "Heard" and "Should be" sit in a fixed left column so the corrections can
+     be read straight down the right-hand side — a trainer working the list
+     mostly wants the fixes, not the diagnosis, and shouldn't have to hunt for
+     where one starts. */
+  .ai-correction-line {
+    display: grid;
+    grid-template-columns: 74px minmax(0, 1fr);
+    gap: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    margin-bottom: 3px;
+    overflow-wrap: break-word;
+  }
+  .ai-correction-line:last-child { margin-bottom: 0; }
+  .ai-correction-tag {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    padding-top: 3px;
+  }
+  .ai-correction-fix { color: var(--text-primary); }
+  @media (max-width: 700px) {
+    .ai-correction-line { grid-template-columns: 1fr; gap: 1px; }
+  }
   .ai-note { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin: 6px 0 0; }
   /* Reviewer notes arrive as one long run-on line (Gemini's note plus the
      machine-appended flags, joined with " | "). Rendered as separate bullets
@@ -2258,18 +2351,50 @@ function driveFileIdFromLink(link) {
   return match ? match[1] : null;
 }
 
+// A few words is enough to tell two jump points apart, which is all this has to
+// do — the full quote stays on the tooltip and is printed under the player the
+// moment a chip is clicked.
+function shortQuote(text, maxWords) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+  return words.length <= maxWords ? words.join(' ') : words.slice(0, maxWords).join(' ') + '…';
+}
+
+// How many passes must point at the same moment before it's worth marking. 1 is
+// not a negative signal — a single pass citing something is the normal case — so
+// an unmarked chip means "no corroboration", not "doubtful".
+const CLIP_CORROBORATION_MIN_RUNS = 2;
+
 function clipChips(clips, interactive) {
   if (!clips || !clips.length) return '';
-  const chips = clips.map(clip => {
+  // Only ever 1–3 of these (MAX_CLIPS_PER_SECTION), so stacking them can't run away.
+  const multi = clips.length > 1;
+  const rows = clips.map(clip => {
+    const runs = Number(clip.runs) || 0;
+    const corroborated = runs >= CLIP_CORROBORATION_MIN_RUNS;
     const quote = clip.quote ? ` — “${clip.quote}”` : '';
-    const tip = `Jump to about ${clip.at}${quote}`;
-    return interactive
-      ? `<button type="button" class="clip-chip" data-seconds="${escapeHtml(String(clip.seconds))}" data-at="${escapeHtml(clip.at)}" data-quote="${escapeHtml(clip.quote || '')}" title="${escapeHtml(tip)}">${escapeHtml(clip.at)}</button>`
-      : `<span class="clip-chip is-static" title="${escapeHtml(tip)}">${escapeHtml(clip.at)}</span>`;
+    // Deliberately says "passes pointed here" rather than any share of a total:
+    // a degraded grade (V11) can run on fewer than 3 passes, so a denominator
+    // printed here would sometimes be a lie. The count on its own always holds.
+    const runsNote = corroborated ? ` · ${runs} of the AI's passes pointed here` : '';
+    const tip = `Jump to about ${clip.at}${quote}${runsNote}`;
+    const runsBadge = corroborated
+      ? `<span class="clip-runs">&times;${escapeHtml(String(runs))}</span>`
+      : '';
+    const cls = 'clip-chip' + (corroborated ? ' is-corroborated' : '') + (interactive ? '' : ' is-static');
+    const chip = interactive
+      ? `<button type="button" class="${cls}" data-seconds="${escapeHtml(String(clip.seconds))}" data-at="${escapeHtml(clip.at)}" data-quote="${escapeHtml(clip.quote || '')}" title="${escapeHtml(tip)}">${escapeHtml(clip.at)}${runsBadge}</button>`
+      : `<span class="${cls}" title="${escapeHtml(tip)}">${escapeHtml(clip.at)}${runsBadge}</span>`;
+    if (!multi) return chip;
+    const brief = shortQuote(clip.quote, 5);
+    const quoteLine = brief
+      ? `<span class="ai-clip-quote" title="${escapeHtml(clip.quote || '')}">“${escapeHtml(brief)}”</span>`
+      : '';
+    return `<div class="ai-clip-line">${chip}${quoteLine}</div>`;
   }).join('');
-  return `<div class="ai-clips">
+  return `<div class="ai-clips${multi ? ' is-multi' : ''}">
     <span class="ai-detail-label">Listen at</span>
-    <div class="ai-clip-row">${chips}</div>
+    <div class="ai-clip-row">${rows}</div>
   </div>`;
 }
 
@@ -2391,11 +2516,12 @@ function wireEvidencePlayer(container, fileId) {
 
   loadBtn.addEventListener('click', () => { ensureLoaded().catch(() => {}); });
 
-  // Nudge controls. The AI's clock can slip ~20s at a stretch of silence and
-  // never recover, which no fixed offset can correct for — so rather than
-  // pretending the number is right, landing near it and letting a manager step
-  // forward in one click is the honest fix. Skewed toward forward because
-  // every measured citation ran early, never late.
+  // Nudge controls. NOT because the timestamps drift — measured against a real
+  // clip they landed 0–4s early, every time (see CLIP_PREROLL_SECONDS above).
+  // They're here because a cited time marks where a TOPIC OPENS, which is what
+  // the prompt asks for, so the specific line a manager wants is usually a
+  // little further in. Hence the forward skew: stepping ahead is the common
+  // move, stepping back the rare one.
   if (nudgeRow) {
     nudgeRow.addEventListener('click', (event) => {
       const btn = event.target.closest('.ai-nudge-btn');
@@ -2465,6 +2591,124 @@ function detailColumn(label, text) {
   </div>`;
 }
 
+/* ------------------- Corrections (the fix-list) -------------------
+   Added 2026-08-13 on Jordan's ask. A Training Day runs over two days and the
+   recording is submitted while there's still time left with the Site Operator,
+   so the card was missing the one thing a trainer actually needs from it in
+   that moment: what to go back over before the session ends. Every section
+   already carried what was wrong; nothing pulled it into a list to work down.
+
+   Deliberately NOT the same thing as Focus areas — focus areas are for the
+   NEXT session, corrections are for THIS one, before it's over. The prompt
+   (Code.gs rule 9) says so explicitly, because without that they come back as
+   the same list twice.
+
+   Must stay in step with normalizeCorrections() in Code.gs: a freshly graded
+   session gets its list from there, the same session re-opened from the log
+   gets it rebuilt here out of the raw runs. Both sort by priority ONLY, and
+   rely on the sort being stable to keep the AI's own ordering inside each
+   priority — so the two paths can't hand back a differently-ordered list. */
+const MAX_CORRECTIONS = 6;
+
+function normalizeCorrections(list) {
+  if (!Array.isArray(list)) return [];
+  const cleaned = [];
+  list.forEach(entry => {
+    if (!entry || typeof entry !== 'object') return;
+    const issue = String(entry.issue || '').trim();
+    const correct = String(entry.correct || '').trim();
+    // Half a correction — "something was wrong here" with no fix, or a fix with
+    // nothing it's fixing — is worse than one fewer correction, because it puts
+    // a row on a to-do list that nobody can act on.
+    if (!issue || !correct) return;
+    const priority = String(entry.priority || '').trim().toLowerCase();
+    // Parsed the same way evidence timestamps are. A malformed time costs this
+    // correction its jump point only — WHAT to fix still stands even when where
+    // to hear it doesn't.
+    const seconds = parseClipSeconds(entry.at);
+    cleaned.push({
+      section: String(entry.section || '').trim(),
+      issue,
+      correct,
+      seconds,
+      at: seconds === null ? '' : formatClipTime(seconds),
+      // Only the two values the prompt asks for are honoured. Anything else,
+      // including a missing field, leaves this blank rather than guessing: the
+      // row then renders with no priority badge instead of the page claiming an
+      // urgency the AI never actually assigned it.
+      priority: (priority === 'must_fix' || priority === 'should_fix') ? priority : ''
+    });
+  });
+  const rank = p => (p === 'must_fix' ? 0 : p === 'should_fix' ? 1 : 2);
+  cleaned.sort((a, b) => rank(a.priority) - rank(b.priority));
+  return cleaned.slice(0, MAX_CORRECTIONS);
+}
+
+// The deadline is real and it differs by session type, so the heading names it
+// instead of saying a vague "soon" — a Training Day has until the end of Day 2,
+// a Team On-Site Day only until the manager drives away.
+const CORRECTIONS_HEADING = {
+  'Training Day': 'Corrections to make before the end of Day 2',
+  'Team On-Site Day': 'Corrections to make before leaving the site'
+};
+
+function correctionsBlock(result, interactive) {
+  const items = normalizeCorrections(result.corrections);
+  // Nothing to correct, or a session graded before V13 existed: render nothing
+  // at all rather than an empty box that reads like "the AI found no problems".
+  if (!items.length) return '';
+
+  const heading = CORRECTIONS_HEADING[result.session_type] || 'Corrections to make before the session ends';
+
+  const rows = items.map(c => {
+    // Same title-casing the section list above uses, so a correction can be
+    // matched back to the section it came from at a glance.
+    const sectionLabel = c.section
+      ? c.section.replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase())
+      : '';
+    const badge = c.priority === 'must_fix'
+      ? `<span class="badge critical" title="A customer would be told something wrong, or a rule was broken — the AI puts this ahead of the rest.">Must fix</span>`
+      : c.priority === 'should_fix'
+        ? `<span class="badge warning" title="A real gap, but not something that misinforms a customer or breaks a rule.">Worth fixing</span>`
+        : '';
+
+    // A correction with no timestamp is the AI saying this never came up at
+    // all — which is exactly the kind of thing that's worth catching before the
+    // session ends, so it says so plainly instead of just showing no chip.
+    let where;
+    if (c.seconds === null) {
+      where = `<span class="ai-correction-nowhere">never came up</span>`;
+    } else {
+      const tip = `Jump to about ${c.at}`;
+      where = interactive
+        ? `<button type="button" class="clip-chip" data-seconds="${escapeHtml(String(c.seconds))}" data-at="${escapeHtml(c.at)}" data-quote="" title="${escapeHtml(tip)}">${escapeHtml(c.at)}</button>`
+        : `<span class="clip-chip is-static" title="${escapeHtml(tip)}">${escapeHtml(c.at)}</span>`;
+    }
+
+    return `<div class="ai-correction">
+      <div class="ai-correction-head">
+        ${badge}
+        ${sectionLabel ? `<span class="ai-correction-section">${escapeHtml(sectionLabel)}</span>` : ''}
+        ${where}
+      </div>
+      <div class="ai-correction-line">
+        <span class="ai-correction-tag">${c.seconds === null ? 'Missing' : 'Heard'}</span>
+        <span>${escapeHtml(c.issue)}</span>
+      </div>
+      <div class="ai-correction-line">
+        <span class="ai-correction-tag">Should be</span>
+        <span class="ai-correction-fix">${escapeHtml(c.correct)}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="ai-corrections">
+    <span class="ai-callout-label">${escapeHtml(heading)}</span>
+    <p class="ai-corrections-intro">What to go back over while you're still with them. Same caveat as the rest of this card — listen to the moment before you correct someone on it. This is a prompt for your judgement, not a verdict.</p>
+    ${rows}
+  </div>`;
+}
+
 // audioFileId is the Drive ID of the session recording, when it's known — it
 // turns each section's cited timestamps into clickable jump points. Optional
 // on purpose: results graded before evidence timestamps existed, and rows with
@@ -2480,6 +2724,7 @@ function renderAiGradingResult(result, container, audioFileId) {
   let anyInconsistent = false;
   let anyNeedsReview = false;
   let anyClips = false;
+  let anyCorroborated = false;
   const sectionItems = Object.entries(result.sections || {}).map(([key, val]) => {
     const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     if (val.evidence_basis === 'inconsistent_across_runs') {
@@ -2503,6 +2748,7 @@ function renderAiGradingResult(result, container, audioFileId) {
     // already goes on a section that needs checking.
     const clips = Array.isArray(val.evidence_clips) ? val.evidence_clips : [];
     if (clips.length) anyClips = true;
+    if (clips.some(c => (Number(c && c.runs) || 0) >= CLIP_CORROBORATION_MIN_RUNS)) anyCorroborated = true;
     const runScores = val.needs_human_review ? runScoresLine(val.run_scores) : '';
     return `<div class="ai-section-item">
       <div class="ai-section-header">
@@ -2528,7 +2774,8 @@ function renderAiGradingResult(result, container, audioFileId) {
     anyNoEvidence ? `<div class="ai-section-footnote"><span class="score-note-mark">*</span> Never came up in the recording. Counts as 0.</div>` : '',
     anyInconsistent ? `<div class="ai-section-footnote"><span class="score-note-mark">†</span> Came up, but the 3 AI passes couldn't agree if it was scorable. Counts as 0 — worth a listen.</div>` : '',
     anyNeedsReview ? `<div class="ai-section-footnote"><strong>Double-check</strong> — the 3 AI passes disagreed by more than 2 points. Least reliable score here.</div>` : '',
-    anyClips ? `<div class="ai-section-footnote"><strong>Listen at</strong> — where the AI says it heard what set that score. Approximate, and its reading of the moment can still be wrong: the point is to get you to the right part of the recording fast enough to judge for yourself.</div>` : ''
+    anyClips ? `<div class="ai-section-footnote"><strong>Listen at</strong> — where the AI says it heard what set that score. Approximate, and its reading of the moment can still be wrong: the point is to get you to the right part of the recording fast enough to judge for yourself.</div>` : '',
+    anyCorroborated ? `<div class="ai-section-footnote"><strong>&times;2</strong> / <strong>&times;3</strong> — how many of the AI passes landed on that same moment independently. More passes agreeing is a better bet for where to start listening; it says nothing about whether the score is right.</div>` : ''
   ].filter(Boolean);
   const sectionFootnotes = footnoteLines.length
     ? `<div class="ai-section-footnotes">${footnoteLines.join('')}</div>`
@@ -2611,6 +2858,7 @@ function renderAiGradingResult(result, container, audioFileId) {
       ${calloutBlock('Weak areas', 'weak', result.weak_areas)}
       ${calloutBlock('Focus areas', 'focus', result.focus_areas)}
     </div>
+    ${correctionsBlock(result, !!audioFileId)}
     ${result.day1_carryover_notes ? `<p class="ai-note"><strong>Day 1 carryover notes:</strong> ${escapeHtml(result.day1_carryover_notes)}</p>` : ''}
     ${reviewerNotesBlock}
   `;
@@ -2732,9 +2980,28 @@ function parseAiResultFromRow(r) {
     strong_areas: splitList(r[12]),
     weak_areas: splitList(r[13]),
     focus_areas: splitList(r[14]),
+    corrections: correctionsFromRuns(runs),
     day1_carryover_notes: r[15] || '',
     notes_for_human_reviewer: r[16] || ''
   };
+}
+
+// Corrections are the one part of the result with no sheet column of its own.
+// T/U/V belong to the follow-up state this page writes, so Code.gs still stops
+// at S and a 20th appended column would land on top of "Follow-Up Status" —
+// they ride along in the raw JSON instead and get rebuilt from it here.
+//
+// Code.gs takes them from the LAST completed run (they're prose, not scores, so
+// there's nothing to reconcile across runs); this matches that, or the same
+// session would show a different fix-list depending on whether it was freshly
+// graded or re-opened from the log. Walking backwards rather than indexing the
+// end handles the case where the last run's JSON didn't parse — it never made
+// it into `runs`, so the newest one that did is the closest equivalent.
+function correctionsFromRuns(runs) {
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (Array.isArray(runs[i].corrections) && runs[i].corrections.length) return runs[i].corrections;
+  }
+  return [];
 }
 
 // Plain "12/110" score for the AI Grade column — a missing/non-numeric
