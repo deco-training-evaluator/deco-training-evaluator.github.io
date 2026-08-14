@@ -17,7 +17,7 @@ A web app that grades DECO field-training sessions. A manager uploads an audio r
 **The app is called "Development Dashboard"** — that's what the header, the browser tab title and the panel pills say. "DECO Training Evaluator" survives only as the name of this local folder.
 
 **The rename HAPPENED on 2026-08-14.** Jordan renamed the GitHub organisation and the repo, and both are now `development-dashboard` — confirmed two ways: a `git push` reported `This repository moved` and named the new location, and the new address serves the app. Notes for whoever is here next:
-- **`git remote set-url origin https://github.com/development-dashboard/development-dashboard.github.io.git` still needs running.** The old URL currently works only because GitHub is redirecting it, and that redirect is not something to rely on. (Attempted 2026-08-14 and blocked by a permission prompt, so it's still outstanding.)
+- **The git remote is already correct** — it reads `https://github.com/development-dashboard/development-dashboard.github.io.git`. Nobody had to set it: git rewrote it itself on the first push after the rename, having followed GitHub's permanent redirect. Worth knowing, because the CLAUDE.md instruction to run `git remote set-url` by hand is now unnecessary rather than outstanding.
 - **Whether `https://development-dashboard.github.io` was added to the Google OAuth client BEFORE the rename is unconfirmed.** If it wasn't, sign-in on the new address is broken right now and the symptom is that the sign-in button does nothing — no error. That's the first thing to check if anyone reports being unable to sign in. See the OAuth note below.
 - The old address does **not** forward, and the old org name `deco-training-evaluator` is released for anyone to claim.
 
