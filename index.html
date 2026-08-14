@@ -524,6 +524,82 @@
     border-color: var(--brand-orange);
     box-shadow: var(--ring);
   }
+  /* The toolbar's buttons are one group pinned to the right. Without this each
+     button carries its own margin-left:auto and the free space splits between
+     them, stranding one mid-row instead of standing them side by side. */
+  .filter-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .filter-actions .btn { margin-left: 0; }
+
+  /* --------------- Add a person to the Roster ---------------
+     Adding somebody is the only thing on this page that creates a row rather
+     than reading or amending one, so it's the one primary orange button here —
+     and the plus turns into a close X while the form is open, so the button
+     that opened the panel is also the one that shuts it. */
+  .add-person-btn { display: inline-flex; align-items: center; gap: 9px; }
+  .add-person-btn .plus {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px;
+    flex: none;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--brand-black) 80%, transparent);
+    color: var(--brand-orange);
+    transition: transform 0.2s var(--ease);
+  }
+  .add-person-btn .plus svg { width: 11px; height: 11px; display: block; }
+  .add-person-btn.open .plus { transform: rotate(45deg); }
+  /* Inline under the toolbar rather than in a dialog, for the same reason the
+     certify preview and the out-of-order warning are inline: the table it's
+     about stays on screen while you fill it in. */
+  .add-person-form {
+    padding: 16px 18px 18px;
+    margin: -4px 0 18px;
+    border: 1px solid color-mix(in srgb, var(--brand-orange) 36%, var(--border));
+    border-radius: var(--radius-lg);
+    background: var(--sunken);
+    box-shadow: var(--shadow-sm);
+  }
+  /* The slide moves the panel and nothing else — no fill mode, and opacity
+     deliberately left out of it. Anything the animation controls is whatever
+     frame the animation is on, so a browser that doesn't advance animations
+     would leave a panel somebody just opened sitting at opacity 0. Off by six
+     pixels is a survivable worst case; invisible isn't. */
+  @media (prefers-reduced-motion: no-preference) {
+    .add-person-form:not(.hidden) { animation: addPersonIn 0.22s var(--ease); }
+  }
+  @keyframes addPersonIn {
+    from { transform: translateY(-7px); }
+    to   { transform: none; }
+  }
+  .add-person-title {
+    font-family: var(--font-display);
+    font-size: 16.5px; font-weight: 700;
+    margin: 0 0 4px;
+  }
+  .add-person-sub {
+    font-size: 12.5px; line-height: 1.6;
+    color: var(--text-secondary);
+    margin: 0 0 15px;
+    max-width: 78ch;
+  }
+  .add-person-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; }
+  @media (max-width: 760px) { .add-person-grid { grid-template-columns: 1fr; } }
+  .add-person-new { margin-top: 8px; }
+  .add-person-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  /* Same reasoning as .alert-bar-title: full-strength --critical on a tinted or
+     sunken background doesn't clear AA at this size, so it's pulled a little
+     toward the page's own text colour. */
+  .add-person-error {
+    font-size: 12.5px; font-weight: 600; line-height: 1.5;
+    color: color-mix(in srgb, var(--critical) 78%, var(--text-primary));
+  }
+  /* Where the new person landed, said in the table itself — the row can be a
+     long way down a sorted roster. A resting tint, not an animation, on the
+     same rule as the alert bars. */
+  .roster-row.just-added,
+  .roster-row.just-added:hover {
+    background: color-mix(in srgb, var(--good) 20%, var(--page));
+    box-shadow: inset 4px 0 0 var(--good);
+  }
   #dashboard-table-wrap, #recent-log-wrap {
     overflow-x: auto;
     max-width: 100%;
@@ -658,7 +734,11 @@
   .edit-status {
     font-size: 12.5px;
     font-weight: 600;
-    color: var(--good);
+    /* Measured: full-strength --good on white is 4.45:1 at this size — a hair
+       under AA. Same pull toward the page's text colour as .alert-bar-title,
+       which takes it to 5.87 light / 8.4 dark and still reads as the green
+       "saved" line. */
+    color: color-mix(in srgb, var(--good) 82%, var(--text-primary));
     margin: 0 0 10px;
   }
   .edit-status:empty { display: none; margin: 0; }
@@ -1848,8 +1928,46 @@
           <select id="filter-region"><option value="">All regions</option></select>
           <select id="filter-role"><option value="">All roles</option></select>
           <input id="filter-search" type="text" placeholder="Search name…">
-          <button id="refresh-dashboard-btn" class="btn secondary">Refresh</button>
+          <div class="filter-actions">
+            <button type="button" id="add-person-btn" class="btn add-person-btn" aria-expanded="false" aria-controls="add-person-form">
+              <span class="plus" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><path d="M10 4.4v11.2M4.4 10h11.2" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg></span>
+              <span class="add-person-label">Add person</span>
+            </button>
+            <button id="refresh-dashboard-btn" class="btn secondary">Refresh</button>
+          </div>
         </div>
+        <!-- Adding someone writes a new row straight to the Roster sheet.
+             Inline under the toolbar rather than in a dialog, the same reason the
+             certify preview and the out-of-order warning are inline: the table
+             it's about stays on screen while it's being filled in. -->
+        <form id="add-person-form" class="add-person-form hidden" autocomplete="off">
+          <p class="add-person-title">Add someone to the Roster</p>
+          <p class="add-person-sub">This writes a new row to the Roster sheet. Every training step and both
+            certifications start at <strong>Pending</strong> — tick them off on the table below once they're
+            done. Get the name right: the rest of the app matches a graded session to a person by name, so a
+            name spelled differently here won't line up with their recordings, and two people can't share one.</p>
+          <div class="add-person-grid">
+            <div class="field">
+              <label for="ap-name">Full name</label>
+              <input id="ap-name" type="text" placeholder="e.g. Jordan Evans" required>
+            </div>
+            <div class="field">
+              <label for="ap-role">Role</label>
+              <select id="ap-role"></select>
+              <input id="ap-role-new" class="add-person-new hidden" type="text" placeholder="Name the new role" aria-label="New role name">
+            </div>
+            <div class="field">
+              <label for="ap-region">Region</label>
+              <select id="ap-region"></select>
+              <input id="ap-region-new" class="add-person-new hidden" type="text" placeholder="Name the new region" aria-label="New region name">
+            </div>
+          </div>
+          <div class="add-person-actions">
+            <button type="submit" id="ap-submit" class="btn">Add to Roster</button>
+            <button type="button" id="ap-cancel" class="btn secondary">Cancel</button>
+            <span id="ap-error" class="add-person-error" role="alert"></span>
+          </div>
+        </form>
         <!-- A roster edit writes to a Sheet nobody is looking at, so both
              outcomes are said out loud here: a failure in the loud alert-bar
              shell (which also scrolls itself into view, since the badge that
@@ -2744,11 +2862,20 @@ async function loadRoster() {
 function populateFilterOptions() {
   const regionSel = document.getElementById('filter-region');
   const roleSel = document.getElementById('filter-role');
+  // Both selections are kept across a re-read. This runs on every Refresh and
+  // after somebody is added, and rebuilding the options used to silently drop
+  // the filter back to "All" — so the table would widen out under someone who
+  // had narrowed it, while the search box beside it kept what was typed. A
+  // value that has since left the Roster falls back to "All" on its own.
+  const keepDashRegion = regionSel.value;
+  const keepDashRole = roleSel.value;
   const regions = [...new Set(rosterRows.map(r => r['Region']).filter(Boolean))].sort();
   const roles = [...new Set(rosterRows.map(r => r['Role']).filter(Boolean))].sort();
   const regionOptions = '<option value="">All regions</option>' + regions.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
   regionSel.innerHTML = regionOptions;
   roleSel.innerHTML = '<option value="">All roles</option>' + roles.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+  regionSel.value = keepDashRegion;
+  roleSel.value = keepDashRole;
 
   // Follow-Ups filters by the same regions — a graded session has no region of
   // its own, it inherits the region of the person it's about (see regionForPerson).
@@ -2756,6 +2883,10 @@ function populateFilterOptions() {
   const keepRegion = fuRegionSel.value;
   fuRegionSel.innerHTML = regionOptions + `<option value="${UNKNOWN_REGION}">${escapeHtml(UNKNOWN_REGION)}</option>`;
   fuRegionSel.value = keepRegion;
+
+  // The Add-person pickers offer the roles and regions the Roster already uses,
+  // so they're refilled from the same read rather than from a hardcoded list.
+  populateAddPersonChoices();
 }
 
 ['filter-region','filter-role','filter-search'].forEach(id => {
@@ -3191,7 +3322,7 @@ function certBadge(val) {
 let rosterEditBusy = false;
 let armedRosterToggle = null;
 let rosterEditStatusTimer = null;
-function rosterEditInProgress() { return rosterEditBusy || !!armedRosterToggle; }
+function rosterEditInProgress() { return rosterEditBusy || addPersonBusy || !!armedRosterToggle; }
 
 function isYesValue(val) { return (val || '').toString().trim().toLowerCase() === 'yes'; }
 
@@ -3307,7 +3438,7 @@ function showRosterEditStatus(message) {
 // most of a roster below the top of the table. Plain scroll, no
 // behavior:'smooth' — smooth scrolling is a silent no-op in some browsers, and
 // a notice whose whole job is to not be missed must not ride on it.
-function showRosterEditError(message) {
+function showRosterEditError(message, title) {
   const host = document.getElementById('dashboard-edit-error');
   if (!host) return;
   if (!message) { host.innerHTML = ''; return; }
@@ -3315,7 +3446,7 @@ function showRosterEditError(message) {
     `<div class="alert-bar critical is-new" role="alert">` +
       `<div class="alert-bar-icon">${alertIcon()}</div>` +
       `<div class="alert-bar-body">` +
-        `<div class="alert-bar-title">That change didn't reach the Roster</div>` +
+        `<div class="alert-bar-title">${escapeHtml(title || "That change didn't reach the Roster")}</div>` +
         `<div class="alert-bar-text"></div>` +
       `</div>` +
     `</div>`;
@@ -3382,6 +3513,242 @@ function wireRosterToggles(wrap) {
     });
   });
 }
+
+/* ---------------- Adding someone to the Roster ----------------
+   The Dashboard could already change every status on a person but couldn't
+   create the person, so a new hire meant leaving the app and typing a row into
+   the Sheet by hand — which is also the one way a name ends up spelled
+   differently from the name the grading form will send, and a name is what joins
+   the two Sheets together. Decisions worth not re-litigating:
+
+   - Same permission as the badge toggles: a HUMAN is adding this row. Nothing
+     about an AI grade writing to the Roster has changed — that's still Phase 5.
+   - The row is built against the HEADER ROW, never by position, so a column
+     inserted into the Roster moves the value with it instead of putting a name
+     in somebody's region. Any column the form doesn't collect is left blank; the
+     six status columns are then one click each on the new row.
+   - A duplicate name is REFUSED, not warned about. rosterPerson,
+     submissionsForPerson and every certification write join on the name, and two
+     people sharing one would silently collapse into whichever the Sheet lists
+     first — including for a write that signs somebody off.
+   - Role and Region are picked from what the Roster already uses, with an
+     explicit "not listed" option behind them. Free text creates "BC1 " and
+     "Field manager" as separate groups on the stat strip and quietly drops the
+     person out of the filter they belong in.
+   - The append is READ BACK before anything on screen says it worked, the same
+     reason writeRosterCell reads its cell back.
+   - Afterwards the roster is RELOADED rather than the new person being pushed
+     into rosterRows by hand: loadRoster is what stamps ROSTER_ROW_NUMBER, and a
+     guessed row number on a certification column signs off the wrong person. */
+const ADD_PERSON_NEW_VALUE = '__new__';
+let addPersonBusy = false;
+let justAddedTimer = null;
+
+function addPersonForm() { return document.getElementById('add-person-form'); }
+
+// Whatever the Roster already uses, plus one "not listed" option. Refilled on
+// every roster load, keeping anything half-picked — a Refresh mid-form shouldn't
+// empty it.
+function populateAddPersonChoices() {
+  [['ap-role', 'Role', 'role'], ['ap-region', 'Region', 'region']].forEach(([id, column, word]) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const keep = sel.value;
+    const values = [...new Set(rosterRows.map(r => (r[column] || '').trim()).filter(Boolean))].sort();
+    sel.innerHTML = `<option value="">Pick a ${word}…</option>` +
+      values.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('') +
+      `<option value="${ADD_PERSON_NEW_VALUE}">+ A ${word} that isn't listed…</option>`;
+    sel.value = keep;
+    syncAddPersonNewField(id, false);
+  });
+}
+
+// The free-text box only exists while "not listed" is picked, and is emptied
+// when it isn't — so a typed-then-abandoned value can't be what gets written.
+function syncAddPersonNewField(selectId, focusIt) {
+  const sel = document.getElementById(selectId);
+  const box = document.getElementById(selectId + '-new');
+  if (!sel || !box) return;
+  const isNew = sel.value === ADD_PERSON_NEW_VALUE;
+  box.classList.toggle('hidden', !isNew);
+  if (!isNew) { box.value = ''; return; }
+  if (focusIt) box.focus();
+}
+
+// What a picker actually resolves to: a listed value, or the typed-in new one.
+function addPersonChoice(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return '';
+  if (sel.value !== ADD_PERSON_NEW_VALUE) return sel.value.trim();
+  const box = document.getElementById(selectId + '-new');
+  return box ? box.value.trim() : '';
+}
+
+function toggleAddPersonForm(open) {
+  const form = addPersonForm();
+  const btn = document.getElementById('add-person-btn');
+  if (!form || !btn) return;
+  const show = open === undefined ? form.classList.contains('hidden') : !!open;
+  form.classList.toggle('hidden', !show);
+  btn.classList.toggle('open', show);
+  btn.setAttribute('aria-expanded', show ? 'true' : 'false');
+  const label = btn.querySelector('.add-person-label');
+  if (label) label.textContent = show ? 'Close' : 'Add person';
+  if (show) {
+    showAddPersonError('');
+    populateAddPersonChoices();
+    document.getElementById('ap-name').focus();
+  } else {
+    resetAddPersonForm();
+  }
+}
+
+function resetAddPersonForm() {
+  const form = addPersonForm();
+  if (!form) return;
+  form.reset();
+  syncAddPersonNewField('ap-role', false);
+  syncAddPersonNewField('ap-region', false);
+  showAddPersonError('');
+}
+
+// Anything the form can catch itself is said inside the form, next to the field
+// that's wrong. Only a failed write to the Sheet gets the loud bar.
+function showAddPersonError(message) {
+  const el = document.getElementById('ap-error');
+  if (el) el.textContent = message || '';
+}
+
+async function submitAddPerson() {
+  if (addPersonBusy) return;
+  const nameInput = document.getElementById('ap-name');
+  const roleSel = document.getElementById('ap-role');
+  const regionSel = document.getElementById('ap-region');
+  // Runs of whitespace are collapsed: " Jordan  Evans " and "Jordan Evans" are
+  // the same person, and this name is the key everything else joins on.
+  const name = nameInput.value.trim().replace(/\s+/g, ' ');
+  const role = addPersonChoice('ap-role');
+  const region = addPersonChoice('ap-region');
+
+  const complain = (msg, el) => { showAddPersonError(msg); if (el) el.focus(); };
+  if (!rosterHeaders.length) return complain("The Roster hasn't loaded yet, so there's nothing to add to. Press Refresh first.");
+  if (!rosterHeaders.includes('Name')) return complain('The Roster sheet has no "Name" column, so there is nowhere to write this. Check the sheet’s header row.');
+  if (!name) return complain('Type the person’s full name.', nameInput);
+  const clash = rosterPerson(name);
+  if (clash) {
+    return complain(`${clash['Name']} is already on the Roster — open their row on the table instead. ` +
+      'Two people can’t share a name here, because a graded session is matched to a person by name.', nameInput);
+  }
+  if (!role) return complain('Pick a role, or add one that isn’t listed.', roleSel.value === ADD_PERSON_NEW_VALUE ? document.getElementById('ap-role-new') : roleSel);
+  if (!region) return complain('Pick a region, or add one that isn’t listed.', regionSel.value === ADD_PERSON_NEW_VALUE ? document.getElementById('ap-region-new') : regionSel);
+
+  showAddPersonError('');
+  showRosterEditError('');
+  showRosterEditStatus('');
+  const submitBtn = document.getElementById('ap-submit');
+  const cancelBtn = document.getElementById('ap-cancel');
+  const openBtn = document.getElementById('add-person-btn');
+  const submitLabel = submitBtn.textContent;
+  addPersonBusy = true;
+  [submitBtn, cancelBtn, openBtn].forEach(b => { if (b) b.disabled = true; });
+  submitBtn.textContent = 'Adding…';
+  try {
+    await addPersonToRoster(name, role, region);
+    // Re-read rather than pushing the person into rosterRows by hand — this is
+    // what gives them their real Sheet row number, which every later write to
+    // their row depends on.
+    await loadRoster();
+    addPersonBusy = false;
+    toggleAddPersonForm(false);
+    flashRosterRow(name);
+    showRosterEditStatus(addedPersonConfirmation(name, role, region));
+  } catch (e) {
+    showRosterEditError(`Couldn’t add ${name} to the Roster — ${e.message}`, 'That new person didn’t reach the Roster');
+    // Deliberately not "nothing was added": an append that goes through and then
+    // reads back wrong may well have left a row behind, and this can't tell.
+    // Saying so is what sends someone to look at the Sheet before retrying.
+    showAddPersonError('That didn’t save. The reason is in the red bar below, and what you typed is still here.');
+  } finally {
+    addPersonBusy = false;
+    [submitBtn, cancelBtn, openBtn].forEach(b => { if (b) b.disabled = false; });
+    submitBtn.textContent = submitLabel;
+  }
+}
+
+// One row appended, then read back. Built against the header row so a column
+// inserted into the Roster can't redirect a value into its neighbour's cell.
+async function addPersonToRoster(name, role, region) {
+  if (!(await ensureFreshToken())) throw new Error('your Google sign-in has expired. Sign in again and retry.');
+  const row = rosterHeaders.map(h => {
+    if (h === 'Name') return name;
+    if (h === 'Role') return role;
+    if (h === 'Region') return region;
+    // Everything else — the four training steps and both certifications — is
+    // left blank on purpose. Blank reads as Pending / Not yet, which is the
+    // honest starting point for somebody who hasn't done any of it yet.
+    return '';
+  });
+  const res = await sheetsAppend(ROSTER_SHEET_ID, 'A1:Z1', row);
+  const landed = res && res.updates && res.updates.updatedRange;
+  if (!landed) {
+    throw new Error('Google didn’t say which row it wrote, so nothing here can confirm it saved. ' +
+      'Open the Roster sheet and check before adding them again.');
+  }
+  // Read the row back before anything on screen says it worked. A write that
+  // quietly doesn't stick has bitten this app before — see writeRosterCell.
+  const back = await sheetsGet(ROSTER_SHEET_ID, landed);
+  const cells = (back[0] || []).map(c => (c || '').toString().trim().toLowerCase());
+  if (!cells.includes(name.toLowerCase())) {
+    // The append reported success and the row disagrees, so whether anything
+    // landed is genuinely unknown from here. Say that rather than guess — a
+    // second attempt on top of a row that did save is how a duplicate gets made.
+    throw new Error(`the row Google says it wrote (${landed}) read back without the name in it. ` +
+      'Open the Roster sheet and check that row before trying again.');
+  }
+  return landed;
+}
+
+function addedPersonConfirmation(name, role, region) {
+  let msg = `Added ${name} (${role}, ${region}) to the Roster — every step starts at Pending. ` +
+    'Click the badges on their row to tick things off.';
+  // A new person in BC3 added while the table is filtered to BC1 is a row that
+  // never appears, which reads as a failed save. Say why instead.
+  if (!rosterRowOnScreen(name)) msg += ' The filters you have set are hiding their row — clear them to see it.';
+  return msg;
+}
+
+function rosterRowOnScreen(name) {
+  const wrap = document.getElementById('dashboard-table-wrap');
+  if (!wrap) return false;
+  // Compared as an attribute rather than in a selector, since a name can
+  // contain an apostrophe.
+  return [...wrap.querySelectorAll('tr.roster-row')].some(el => el.getAttribute('data-person') === name);
+}
+
+// Where they landed, shown in the table itself — a sorted roster can put a new
+// name most of a screen away from the button that added them. Plain scroll, no
+// behavior:'smooth', for the recorded reason: smooth scrolling is a silent
+// no-op in some browsers.
+function flashRosterRow(name) {
+  const wrap = document.getElementById('dashboard-table-wrap');
+  if (!wrap) return;
+  const row = [...wrap.querySelectorAll('tr.roster-row')].find(el => el.getAttribute('data-person') === name);
+  if (!row) return;
+  clearTimeout(justAddedTimer);
+  row.classList.add('just-added');
+  row.scrollIntoView({ block: 'center' });
+  justAddedTimer = setTimeout(() => row.classList.remove('just-added'), 6000);
+}
+
+document.getElementById('add-person-btn').addEventListener('click', () => toggleAddPersonForm());
+document.getElementById('ap-cancel').addEventListener('click', () => toggleAddPersonForm(false));
+document.getElementById('ap-role').addEventListener('change', () => syncAddPersonNewField('ap-role', true));
+document.getElementById('ap-region').addEventListener('change', () => syncAddPersonNewField('ap-region', true));
+addPersonForm().addEventListener('submit', (e) => { e.preventDefault(); submitAddPerson(); });
+addPersonForm().addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !addPersonBusy) toggleAddPersonForm(false);
+});
+
 function checkIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 function xIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>'; }
 function dashIcon() { return '<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="currentColor"/></svg>'; }
@@ -4912,11 +5279,81 @@ function reconcileSectionsFromRuns(runs) {
   return sections;
 }
 
+// Mirror of firstJsonObject() in Code.gs — keep the two identical. Returns the
+// first COMPLETE {...} object in a string and ignores anything after it; '' when
+// there is no balanced object to find.
+//
+// Why the front end needs this at all: Gemini sometimes returns a complete
+// grading object and then keeps writing (a second copy of it, or trailing
+// prose). Code.gs V14 salvages that pass instead of throwing it away — but what
+// it stores in column S is the RAW text, rambling included. So from V14 onward
+// the sheet can hold a run that JSON.parse rejects, and this function is the
+// only reason the rebuild below sees the same number of runs Code.gs did. Before
+// V14 the bad text was discarded and never reached the sheet, which is why this
+// wasn't needed until now.
+//
+// Brace-counting has to know about strings, or a brace inside a justification
+// ("{") and an escaped quote (\") would both throw the depth off and truncate
+// the object mid-way.
+function firstJsonObject(text) {
+  const s = String(text || '');
+  const start = s.indexOf('{');
+  if (start === -1) return '';
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < s.length; i++) {
+    const ch = s.charAt(i);
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return s.substring(start, i + 1);
+    }
+  }
+  return '';   // ran out of text before the object closed — genuinely truncated
+}
+
+// One run's chunk of column S, salvaged the same way Code.gs salvages it.
+// Returns null only when there's no complete object in there at all, so a
+// genuinely truncated run still drops out rather than being half-read.
+function parseRunChunk(chunk) {
+  try {
+    const parsed = JSON.parse(chunk);
+    if (parsed && parsed.sections) return parsed;
+  } catch (e) { /* fall through to the salvage below */ }
+
+  const salvaged = firstJsonObject(chunk);
+  if (!salvaged) return null;
+  try {
+    const parsed = JSON.parse(salvaged);
+    if (parsed && parsed.sections) {
+      console.warn('A logged grading run had ' + (chunk.length - salvaged.length)
+        + ' characters after its JSON; read the first complete object and ignored the rest.');
+      return parsed;
+    }
+  } catch (e) { /* not salvageable either */ }
+  return null;
+}
+
 function parseAiResultFromRow(r) {
   const raw = r[18];
   if (!raw) return null;
 
-  // Older rows: one plain JSON result object.
+  // Older rows: one plain JSON result object. Only a clean one short-circuits
+  // here — a malformed single-object row falls through and gets salvaged by the
+  // chunk path below, which sees it as a single chunk because there's no
+  // separator in it. Deliberately NOT salvaged at this level: firstJsonObject()
+  // on a multi-run row would return run 1 and read it as the whole result,
+  // throwing away consensus, the run scores and the Double-check flags.
   try {
     const single = JSON.parse(raw);
     if (single && single.sections) return single;
@@ -4926,10 +5363,8 @@ function parseAiResultFromRow(r) {
   const chunks = raw.split(/-{3,}\s*next run\s*-{3,}/i).map(c => c.trim()).filter(Boolean);
   const runs = [];
   chunks.forEach(chunk => {
-    try {
-      const parsed = JSON.parse(chunk);
-      if (parsed && parsed.sections) runs.push(parsed);
-    } catch (e) { /* skip a single unparseable run rather than losing the whole row */ }
+    const parsed = parseRunChunk(chunk);
+    if (parsed) runs.push(parsed);   // an unsalvageable run drops out, not the whole row
   });
   if (!runs.length) return null;
 
@@ -5010,8 +5445,10 @@ function manualCertifiedCell(sub) {
   return `<span class="badge pending" title="Manual grade: ${grade} clears the ${threshold} bar. Whether every section reached 6 wasn't recorded on this row, so this can't say certified on its own — the Dashboard has the person's actual status.">${dashIcon()}Bar met</span>`;
 }
 
-// One rule for the Certified column, used by Recent Submissions and by the
-// expanded roster row so the two can't disagree. A graded session shows the
+// One rule for the certification column, used by Recent Submissions and by the
+// expanded roster row so the two can't disagree. On screen that column is
+// headed "Passed" on the session-type tabs (Jordan, 2026-08-14) — "Certified"
+// is the Dashboard's word, and the Roster is the thing that actually holds it. A graded session shows the
 // AI's verdict — that's the column's job during calibration; a session with no
 // recording shows what the person who graded it decided. Null when neither
 // exists, and each caller says its own version of "nothing here".
@@ -5317,7 +5754,7 @@ async function loadRecentLog() {
     // Pre-parse each merged submission's AI result (from its AI row's column S) so we know which are expandable.
     const parsedAi = body.map(s => s.aiRow ? parseAiResultFromRow(s.aiRow) : null);
 
-    let html = '<table class="log-table"><thead><tr><th></th><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Manual Grade</th><th>AI Grade</th><th>Certified</th><th>Audio</th><th></th></tr></thead><tbody>';
+    let html = '<table class="log-table"><thead><tr><th></th><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Manual Grade</th><th>AI Grade</th><th>Passed</th><th>Audio</th><th></th></tr></thead><tbody>';
     body.forEach((s, i) => {
       const when = s.when ? new Date(s.when).toLocaleString() : '';
       const audio = audioLinkOf(s.audioLink);
