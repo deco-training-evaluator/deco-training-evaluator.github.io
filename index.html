@@ -466,6 +466,23 @@
     background: color-mix(in srgb, var(--critical) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--critical) 35%, transparent);
   }
+  /* A deleted grade can leave a certification behind on the Roster. This bar is
+     the offer to take it back down — an offer, not an action, because the app
+     can't know where a "Yes" came from (see offerUncertifyAfterDelete). */
+  .log-cert-notice {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    color: var(--text-primary); font-size: 13px; line-height: 1.5; margin: 0 0 12px;
+    padding: 10px 14px; border-radius: 8px;
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  }
+  .log-cert-notice.done {
+    background: color-mix(in srgb, var(--good) 12%, transparent);
+    border-color: color-mix(in srgb, var(--good) 35%, transparent);
+  }
+  .log-cert-notice .notice-text { flex: 1 1 260px; }
+  .log-cert-notice .notice-err { flex: 1 1 100%; color: var(--critical); }
+  .log-cert-notice .btn { padding: 7px 14px; font-size: 12px; white-space: nowrap; }
   .signed-out-lock { text-align: center; padding: 56px 24px 48px; color: var(--text-secondary); }
   .signed-out-lock .lock-icon { width: 56px; height: 56px; opacity: 0.9; margin-bottom: 18px; }
   .signed-out-lock .lock-title { margin: 0 0 10px; font-size: 15px; }
@@ -2156,6 +2173,48 @@ async function certifyOnRoster(name, sessionType) {
   return `${name} is now certified for ${sessionType} on the Dashboard.`;
 }
 
+// The same write in reverse, for when the grade that earned a certification is
+// deleted. Never called on its own initiative — only from the button in
+// offerUncertifyAfterDelete, because taking a certification away is a
+// manager's decision and the app has no business making it unprompted.
+async function uncertifyOnRoster(name, sessionType) {
+  const column = SESSION_CERT_COLUMN[sessionType];
+  const person = rosterPerson(name);
+  if (!column) throw new Error(`${sessionType} has no certification column on the Roster.`);
+  if (!person) throw new Error(`"${name}" isn't on the Roster.`);
+  const colIndex = rosterHeaders.indexOf(column);
+  if (colIndex === -1) throw new Error(`the Roster has no "${column}" column.`);
+  const cell = `${columnLetter(colIndex)}${person[ROSTER_ROW_NUMBER]}`;
+  // "No", not an empty cell. certBadge() reads the two the same way, but a
+  // written "No" says somebody decided this, where a blank reads as unfilled.
+  await sheetsBatchUpdate(ROSTER_SHEET_ID, [{ range: cell, values: [['No']] }]);
+  // The Sheet was just written, so update the copy in memory instead of
+  // re-reading the whole Roster — loadRoster() would also rebuild the trainee
+  // dropdown, which empties a half-filled form underneath the person.
+  person[column] = 'No';
+  renderDashboardKeepingOpenRow();
+  renderCertPreview();
+}
+
+// The manual grade is stored as text — "88/110" — so pull the number back out.
+function manualGradeTotal(text) {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*\//.exec(text || '');
+  return m ? Number(m[1]) : null;
+}
+
+// Was this submission's manual grade at or above the bar for its session type?
+// Note what this can't know: the "every section scored 6 or higher" tick isn't
+// stored on the row, so a passing total here didn't necessarily certify
+// anybody. That's exactly why a deleted one only ever asks (see
+// offerUncertifyAfterDelete) instead of writing.
+function submissionPassedManually(sub) {
+  const type = (sub && sub.type) || 'Training Day';
+  const threshold = SESSION_PASS_THRESHOLD[type];
+  if (!threshold || !SESSION_CERT_COLUMN[type]) return false;
+  const total = manualGradeTotal(sub && sub.manualGrade);
+  return total !== null && total >= threshold;
+}
+
 // Says what pressing Submit will do to the Dashboard, while the score is still
 // on screen and editable. The "below the bar" case is spelled out too — it
 // answers "why didn't it certify?" before it gets asked.
@@ -3305,6 +3364,95 @@ function showLogDeleteError(message) {
   bar.textContent = message;
 }
 
+/* ------- A deleted grade can leave a certification behind -------
+   A passing manual grade ticks the certification column on the Roster
+   (certifyOnRoster). That tick lives in a different Sheet from the grade, so
+   deleting the grade used to leave the Dashboard still saying "Certified" with
+   nothing behind it.
+
+   What this deliberately does NOT do is un-certify by itself. The app can't
+   tell where a "Yes" came from — it may have been typed onto the Roster by
+   hand, or earned on a session graded before this app existed — and wiping
+   that because an unrelated row was deleted would be worse than the problem it
+   fixes. So it rules out the cases it can (the person isn't certified; the
+   deleted grade wasn't a pass; another passing grade is still on file) and
+   otherwise puts the decision on screen with one button behind it. */
+function clearUncertifyOffer() {
+  const bar = document.getElementById('log-cert-notice');
+  if (bar) bar.remove();
+}
+
+function offerUncertifyAfterDelete(sub) {
+  clearUncertifyOffer();
+  const name = ((sub && sub.trainee) || '').trim();
+  const type = (sub && sub.type) || 'Training Day';
+  if (!name || !SESSION_CERT_COLUMN[type]) return;
+  if (!isAlreadyCertified(name, type)) return;   // nothing to take back
+  if (!submissionPassedManually(sub)) return;    // this grade can't have been what certified them
+  // Any grade still in the log that would certify them on its own leaves the
+  // Roster exactly where it is. submissionsCache has already had the deleted
+  // session dropped out of it by the time this runs.
+  const stillSupported = submissionsForPerson(name)
+    .some(s => (s.type || 'Training Day') === type && submissionPassedManually(s));
+  if (stillSupported) return;
+  // The Roster's spelling, not whatever was on the row — names are matched
+  // case-insensitively, and this bar is about a specific person on the
+  // Dashboard, so it should read the way that Dashboard row reads.
+  const person = rosterPerson(name);
+  showUncertifyOffer((person && person['Name']) || name, type);
+}
+
+function showUncertifyOffer(name, sessionType) {
+  const wrap = document.getElementById('recent-log-wrap');
+  if (!wrap) return;
+  const bar = document.createElement('div');
+  bar.id = 'log-cert-notice';
+  bar.className = 'log-cert-notice';
+
+  const text = document.createElement('div');
+  text.className = 'notice-text';
+  text.innerHTML = `<strong>${escapeHtml(name)}</strong> is still marked certified for ` +
+    `${escapeHtml(sessionType)} on the Dashboard, and that was the last passing grade on file. ` +
+    `If the certification came from it, set it back — if it was signed off some other way, leave it alone.`;
+
+  const err = document.createElement('div');
+  err.className = 'notice-err';
+  err.hidden = true;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn secondary';
+  btn.textContent = 'Set back to Not yet';
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Updating…';
+    err.hidden = true;
+    try {
+      if (!(await ensureFreshToken())) {
+        throw new Error('your Google sign-in has expired. Sign in again and retry.');
+      }
+      await uncertifyOnRoster(name, sessionType);
+      bar.classList.add('done');
+      text.innerHTML = `<strong>${escapeHtml(name)}</strong> is no longer certified for ` +
+        `${escapeHtml(sessionType)} on the Dashboard.`;
+      btn.remove();
+    } catch (e) {
+      console.error(e);
+      // The offer stays on screen so it can be retried — the Roster write is a
+      // different Sheet from the delete, and the delete itself still stands.
+      btn.disabled = false;
+      btn.textContent = 'Try again';
+      err.textContent = `The Roster couldn't be updated — ${e.message}`;
+      err.hidden = false;
+    }
+  });
+
+  bar.appendChild(text);
+  bar.appendChild(err);
+  bar.appendChild(btn);
+  wrap.prepend(bar);
+}
+
 // Reads the whole Grading Log and merges it into one submission per session.
 // Shared by Recent Submissions (which then filters to the active tab's session
 // type) and by Follow-Ups (which looks across every session type) — one place
@@ -3479,10 +3627,15 @@ async function loadRecentLog() {
         btn.querySelector('.log-delete-label').textContent = 'Deleting…';
         const rowNumbers = (btn.getAttribute('data-sheet-rows') || '').split(',').filter(Boolean);
         const rowIndex = btn.getAttribute('data-row-index');
+        // Held onto now, while the row is still on screen: once the delete goes
+        // through, this is what says whether it left a certification stranded
+        // on the Dashboard (see offerUncertifyAfterDelete).
+        const deletedSub = body[Number(rowIndex)];
         const headerRow = wrap.querySelector(`tr.log-row[data-row-index="${rowIndex}"]`);
         const detailRow = wrap.querySelector(`tr.log-detail-row[data-row-index="${rowIndex}"]`);
         if (headerRow) headerRow.classList.add('deleting');
         showLogDeleteError('');
+        clearUncertifyOffer();
         try {
           // An expired token is the one predictable way a delete can fail, and
           // it's silent from here — renew before writing rather than finding out
@@ -3532,6 +3685,9 @@ async function loadRecentLog() {
               !(s.rowNumbers || []).some(n => gone.has(Number(n))));
           }
           renderDashboardKeepingOpenRow();
+          // Runs after the cache has been pruned above, so "is anything else
+          // still holding this certification up?" is asked of what's left.
+          offerUncertifyAfterDelete(deletedSub);
           loadFollowUps(); // a deleted session must also leave the Follow-Ups list
         } catch (e) {
           if (headerRow) headerRow.classList.remove('deleting');
