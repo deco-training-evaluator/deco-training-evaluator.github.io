@@ -124,23 +124,42 @@
   }
   .btn.secondary { background: transparent; color: var(--text-primary); border: 1px solid var(--border); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* Seven tabs now (Dashboard + six session types), so the row can run wider
+     than a narrow window. Scroll it sideways rather than wrapping to two
+     lines, which would break the single underline the active tab sits on. */
   nav.tabs {
     display: flex;
     gap: 4px;
     padding: 0 24px;
     background: var(--surface-1);
     border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: thin;
   }
   nav.tabs button {
     font: inherit;
     font-size: 14px;
     font-weight: 600;
-    padding: 12px 16px;
+    padding: 12px 14px;
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
     color: var(--text-secondary);
     cursor: pointer;
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+  /* Tabs whose session type isn't wired up yet read one step back from the
+     live ones, so it's obvious at a glance which tabs actually do something. */
+  nav.tabs button.tab-preview { color: var(--text-muted); }
+  nav.tabs button.tab-preview::after {
+    content: '';
+    display: inline-block;
+    width: 5px; height: 5px;
+    margin-left: 7px;
+    border-radius: 50%;
+    background: var(--brand-taupe);
+    vertical-align: middle;
   }
   nav.tabs button:hover { color: var(--text-primary); }
   nav.tabs button.active {
@@ -172,6 +191,83 @@
     margin-bottom: 20px;
   }
   .note strong { color: var(--text-primary); }
+
+  /* ---- Preview tabs (Conversion Call, Reference Check, Stage 1 & 2
+     Interview) -------------------------------------------------------------
+     These session types have rubrics, but the rubrics live outside this app
+     and haven't been loaded into the grader, so the AI has nothing to score
+     them against. The tabs exist to show what the app grows into; they
+     deliberately do nothing. Keep it that way: no fake scores, and no upload
+     button that quietly goes nowhere. */
+  .preview-badge {
+    display: inline-block;
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--brand-taupe);
+    color: var(--text-secondary);
+    background: transparent;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 12px;
+  }
+  .preview-title {
+    font-family: var(--font-display);
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 8px;
+  }
+  .preview-blurb {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    max-width: 64ch;
+    margin: 0 0 22px;
+  }
+  .preview-steps { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+  .preview-step {
+    flex: 1 1 210px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    background: var(--page);
+  }
+  .preview-step-num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--brand-orange);
+    color: var(--brand-black);
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 9px;
+  }
+  .preview-step-text { font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+  .preview-step-text strong { color: var(--text-primary); font-weight: 600; }
+  .preview-mock-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+  /* A dimmed, inert copy of the real grading form — it's here so the shape of
+     the finished tab is visible in a demo. pointer-events:none and the
+     inert/disabled fields keep it from being mistaken for a working form. */
+  .preview-mock {
+    opacity: 0.42;
+    pointer-events: none;
+    user-select: none;
+    filter: saturate(0.55);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 18px;
+  }
   .ai-progress-text { margin-bottom: 8px; }
   .ai-progress-bar {
     height: 6px;
@@ -484,6 +580,31 @@
   .ai-audio-status:empty { display: none; }
   .ai-audio-status.is-err { color: var(--critical); }
   .ai-audio-slot:empty { display: none; }
+  .ai-audio-nudge { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .ai-nudge-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+    margin-right: 2px;
+  }
+  .ai-nudge-btn {
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .ai-nudge-btn:hover {
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    color: var(--accent);
+  }
   .ai-audio-player { width: 100%; display: block; }
   .ai-audio-quote { font-style: italic; color: var(--text-primary); }
   .ai-clips { display: flex; flex-direction: column; gap: 5px; margin-top: 9px; }
@@ -648,9 +769,10 @@
   </div>
 </header>
 
-<nav class="tabs">
+<!-- Tabs are built from SESSION_TABS in JS so the nav, the panel headings and
+     the session type sent for grading can never drift apart. -->
+<nav class="tabs" id="tab-nav">
   <button id="tab-dashboard-btn" class="active">Dashboard</button>
-  <button id="tab-grading-btn">Training</button>
 </nav>
 
 <main>
@@ -684,13 +806,17 @@
       </div>
     </section>
 
-    <!-- GRADING TAB -->
+    <!-- GRADING TAB — shared by every session type that is actually wired up
+         (Training Day and Team On-Site Day). Switching tabs re-points this one
+         panel at a different session type rather than duplicating the form,
+         so there is only ever one copy of the upload/grade logic to maintain. -->
     <section id="tab-grading" class="hidden">
-      <span class="pill">Training Tracker | Training</span>
+      <span class="pill" id="grading-pill">Training Tracker | Training Day</span>
+      <div id="grading-background-note" class="note hidden"></div>
       <div class="panel">
         <form class="grading-form" id="grading-form">
           <div class="field">
-            <label for="g-trainee">Trainee</label>
+            <label for="g-trainee" id="g-trainee-label">Trainee</label>
             <select id="g-trainee" required>
               <option value="">Select a person…</option>
             </select>
@@ -723,11 +849,15 @@
         <div id="aiGradingStatus" class="note hidden"></div>
         <div id="aiGradingResult" class="ai-result-box"></div>
         <div class="recent-log">
-          <h3>Recent submissions</h3>
+          <h3 id="recent-log-heading">Recent Training Day submissions</h3>
           <div id="recent-log-wrap"><div class="empty-state">Sign in to view.</div></div>
         </div>
       </div>
     </section>
+
+    <!-- PREVIEW TABS — rendered into here by renderPreviewTabs() from the
+         SESSION_TABS entries marked status:'preview'. -->
+    <div id="preview-tabs"></div>
 
   </div>
 </main>
@@ -750,13 +880,91 @@ const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googlea
 const AI_GRADING_ENDPOINT = 'https://script.google.com/a/macros/decorepair.com/s/AKfycbyWTE5fjMMSr2pExK0EuyuExZhXT0Por7k2Hh6vXeSrXRbAlDT7qrOsErKz6W_SnY3I/exec';
 /* ============================================================================ */
 
-// This tab ("Training") now only grades Training Day sessions — the earlier
-// in-tab Training Day / Team On-Site Day toggle was removed 2026-08-13 so
-// the app can grow into separate tabs per session type instead (a future
-// "Team On-Site Day" tab would set its own fixed type the same way). If a
-// second grading tab is added later, this becomes that tab's own constant
-// rather than a single shared toggle.
-const CURRENT_SESSION_TYPE = 'Training Day';
+/* ---------------------- Session types / tabs ----------------------
+   One entry per session type the app either grades today or is meant to grade
+   later. This drives the tab buttons, the panel headings, which session type
+   gets sent to the grader, and which Recent Submissions rows are shown — so
+   there's a single place to change when a new session type comes online.
+
+     status: 'live'    — fully wired. Code.gs has a rubric, a section list and
+                         a max score for this exact sessionType string, so the
+                         upload → grade → log round trip works end to end.
+     status: 'preview' — the tab exists but does nothing. The rubric for these
+                         lives outside the app and hasn't been loaded into the
+                         grader, so there is nothing for the AI to score
+                         against. These are Phase 3 ("open it up to the other
+                         avenues"); they come after Training Day grading is
+                         dialled in against real human grades.
+                         Do NOT flip one of these to 'live' just by
+                         changing this string — Code.gs rejects any sessionType
+                         it has no rubric for (see its handler's validation),
+                         so it needs the rubric, the section keys, the max
+                         score and a redeploy first. */
+const SESSION_TABS = [
+  {
+    key: 'grading',
+    label: 'Training Day',
+    sessionType: 'Training Day',
+    status: 'live'
+  },
+  {
+    key: 'onsite',
+    label: 'Team On-Site Day',
+    sessionType: 'Team On-Site Day',
+    status: 'live'
+  },
+  {
+    key: 'conversion',
+    label: 'Conversion Call',
+    sessionType: 'Conversion Call',
+    status: 'preview',
+    phase: 'Phase 3 · More session types',
+    blurb: 'Score a recorded conversion call the same way a Training Day is scored — section by section, with short written feedback and jump-to-the-moment timestamps for anything worth a second listen.'
+  },
+  {
+    // Two kinds of reference check, one tab. Jordan's call (2026-08-13): the
+    // candidate reference check and the parent reference check are close
+    // enough in shape that a second tab would just be clutter — you pick
+    // which one you're grading inside the tab instead. When this goes live
+    // each variant still needs its OWN rubric and its own sessionType string
+    // in Code.gs; `variants` below is the list of those strings.
+    key: 'reference',
+    label: 'Reference Checks',
+    // The tab is plural (it holds two kinds); a single graded session isn't.
+    // Used wherever the copy talks about one recording.
+    singular: 'Reference Check',
+    sessionType: 'Reference Check',
+    variants: ['Reference Check', 'Parent Reference Check'],
+    status: 'preview',
+    phase: 'Phase 3 · More session types',
+    blurb: 'Score a recorded reference check against DECO&rsquo;s own criteria, so every candidate gets read the same way no matter who made the call. Candidate reference checks and parent reference checks both live here &mdash; you pick which one you&rsquo;re grading.'
+  },
+  {
+    key: 'stage1',
+    label: 'Stage 1 Interview',
+    sessionType: 'Stage 1 Interview',
+    status: 'preview',
+    phase: 'Phase 3 · More session types',
+    blurb: 'Score a recorded first-stage interview, section by section, with the same evidence timestamps the Training Day grader produces today.'
+  },
+  {
+    key: 'stage2',
+    label: 'Stage 2 Interview',
+    sessionType: 'Stage 2 Interview',
+    status: 'preview',
+    phase: 'Phase 3 · More session types',
+    blurb: 'Score a recorded second-stage interview on the same scale, so the two interview stages can be put side by side for the same candidate.'
+  }
+];
+
+const LIVE_SESSION_TABS = SESSION_TABS.filter(t => t.status === 'live');
+
+// Which session type the shared grading panel is currently pointed at. Set by
+// showTab(); read wherever a grade is validated, logged or sent to the AI.
+let currentSessionType = 'Training Day';
+// Session type of an AI grade that's still running, or null. Used so a grade
+// started on one tab doesn't render its result into a different tab's panel.
+let gradingInFlightFor = null;
 
 let accessToken = null;
 let tokenClient = null;
@@ -918,14 +1126,158 @@ function onSignedIn() {
   loadRecentLog();
 }
 
-/* ---------------------- Tabs ---------------------- */
+/* ---------------------- Tabs ----------------------
+   The nav and the preview panels are both generated from SESSION_TABS. The two
+   live session types (Training Day, Team On-Site Day) share the single
+   #tab-grading panel — showTab() re-points it rather than there being two
+   copies of the upload form. */
+
+function renderTabNav() {
+  const nav = document.getElementById('tab-nav');
+  SESSION_TABS.forEach(tab => {
+    const btn = document.createElement('button');
+    btn.id = `tab-${tab.key}-btn`;
+    btn.textContent = tab.label;
+    if (tab.status === 'preview') {
+      btn.classList.add('tab-preview');
+      btn.title = `${tab.label} — not switched on yet`;
+    }
+    btn.addEventListener('click', () => showTab(tab.key));
+    nav.appendChild(btn);
+  });
+}
+
+function renderPreviewTabs() {
+  const host = document.getElementById('preview-tabs');
+  SESSION_TABS.filter(t => t.status === 'preview').forEach(tab => {
+    const section = document.createElement('section');
+    section.id = `tab-${tab.key}`;
+    section.className = 'hidden';
+    section.innerHTML =
+      `<span class="pill">Training Tracker | ${escapeHtml(tab.label)}</span>` +
+      `<div class="panel">` +
+        `<div class="preview-badge">${escapeHtml(tab.phase)} &middot; not switched on yet</div>` +
+        `<h2 class="preview-title">${escapeHtml(tab.label)} grading</h2>` +
+        `<p class="preview-blurb">${tab.blurb}</p>` +
+        `<div class="preview-steps">` +
+          `<div class="preview-step"><div class="preview-step-num">1</div>` +
+            `<div class="preview-step-text"><strong>Upload the recording.</strong> Same as the Training Day tab — pick the person, drop in the audio.</div></div>` +
+          `<div class="preview-step"><div class="preview-step-num">2</div>` +
+            `<div class="preview-step-text"><strong>The AI scores it</strong> against the ${escapeHtml(tab.singular || tab.label)} rubric, using the same three-pass consensus method running today.</div></div>` +
+          `<div class="preview-step"><div class="preview-step-num">3</div>` +
+            `<div class="preview-step-text"><strong>You get a read back:</strong> section scores, short written feedback, and &ldquo;listen at&rdquo; timestamps for anything worth double-checking.</div></div>` +
+        `</div>` +
+        `<div class="note"><strong>Not switched on yet.</strong> The rubric for this hasn&rsquo;t been loaded into the grader, so nothing here uploads or scores &mdash; the tab is showing where the app goes next. This is Phase 3: it comes after Training Day grading has been dialled in against real human grades.</div>` +
+        `<div class="preview-mock-label">Preview &mdash; what this tab will look like</div>` +
+        buildMockGradingForm(tab) +
+      `</div>`;
+    host.appendChild(section);
+  });
+}
+
+// A dead copy of the real grading form, purely so a demo can show the shape of
+// a finished tab. Inert three ways over (pointer-events:none via .preview-mock,
+// disabled fields, no form element) so it can't be typed into or submitted.
+function buildMockGradingForm(tab) {
+  const label = tab.singular || tab.label;
+  // Tabs that cover more than one session type (Reference Checks) lead with the
+  // picker that decides which rubric gets used, so the preview shows the actual
+  // first thing a manager does on that tab.
+  const variantField = tab.variants
+    ? `<div class="field"><label>Which check is this?</label><select disabled>` +
+        tab.variants.map(v => `<option>${escapeHtml(v)}</option>`).join('') +
+      `</select></div>`
+    : '';
+  return `<div class="preview-mock" aria-hidden="true">` +
+    `<div class="grading-form">` +
+      variantField +
+      `<div class="field"><label>Candidate</label><select disabled><option>Select a person…</option></select></div>` +
+      `<div class="field"><label>Interviewer (your name)</label><input type="text" disabled placeholder="e.g. Jordan Evans"></div>` +
+      `<div class="field"><label>Manual grade <span class="field-optional">(optional)</span></label><input type="number" disabled placeholder="e.g. 92"></div>` +
+      `<div class="field"><label>Manual feedback <span class="field-optional">(optional)</span></label><textarea disabled placeholder="What went well, what needs work…"></textarea></div>` +
+      `<div class="field"><label>Audio recording</label><input type="file" disabled></div>` +
+      `<div><button type="button" class="btn" disabled>Upload &amp; Grade ${escapeHtml(label)}</button></div>` +
+    `</div>` +
+  `</div>`;
+}
+
 document.getElementById('tab-dashboard-btn').addEventListener('click', () => showTab('dashboard'));
-document.getElementById('tab-grading-btn').addEventListener('click', () => showTab('grading'));
+renderTabNav();
+renderPreviewTabs();
+
 function showTab(name) {
+  const previousSessionType = currentSessionType;
+  const liveTab = LIVE_SESSION_TABS.find(t => t.key === name);
+
+  // Panels: dashboard, the one shared grading panel, and one per preview tab.
   document.getElementById('tab-dashboard').classList.toggle('hidden', name !== 'dashboard');
-  document.getElementById('tab-grading').classList.toggle('hidden', name !== 'grading');
+  document.getElementById('tab-grading').classList.toggle('hidden', !liveTab);
+  SESSION_TABS.filter(t => t.status === 'preview').forEach(t => {
+    document.getElementById(`tab-${t.key}`).classList.toggle('hidden', name !== t.key);
+  });
+
+  // Nav highlight.
   document.getElementById('tab-dashboard-btn').classList.toggle('active', name === 'dashboard');
-  document.getElementById('tab-grading-btn').classList.toggle('active', name === 'grading');
+  SESSION_TABS.forEach(t => {
+    document.getElementById(`tab-${t.key}-btn`).classList.toggle('active', name === t.key);
+  });
+
+  if (!liveTab) return;
+
+  currentSessionType = liveTab.sessionType;
+  document.getElementById('grading-pill').textContent = `Training Tracker | ${liveTab.label}`;
+  document.getElementById('recent-log-heading').textContent = `Recent ${liveTab.label} submissions`;
+  applySessionTypeToForm(liveTab);
+
+  // Moving between the two live grading tabs re-points a shared panel, so
+  // clear out anything belonging to the session type just left — a half-filled
+  // form or a previous result sitting under a new heading would be misleading.
+  if (previousSessionType !== currentSessionType) {
+    resetGradingPanel();
+    loadRecentLog();
+  }
+}
+
+// Point the shared form at a session type: the manual grade is on the rubric's
+// own scale, which differs per type (110 for Training Day, 50 for Team On-Site
+// Day), so the cap and the label both have to follow the tab.
+function applySessionTypeToForm(liveTab) {
+  const max = SESSION_MAX_POSSIBLE[liveTab.sessionType] || 110;
+  const gradeInput = document.getElementById('g-grade');
+  gradeInput.max = String(max);
+  document.getElementById('g-grade-max-label').textContent = String(max);
+  gradeInput.placeholder = `e.g. ${Math.round(max * 0.84)}`;
+  document.getElementById('g-trainee-label').textContent =
+    liveTab.sessionType === 'Team On-Site Day' ? 'Person being observed' : 'Trainee';
+}
+
+function resetGradingPanel() {
+  const form = document.getElementById('grading-form');
+  form.reset();
+  ['g-grade', 'g-feedback', 'g-grader'].forEach(id => { document.getElementById(id).disabled = false; });
+  const statusEl = document.getElementById('grade-status');
+  statusEl.textContent = '';
+  statusEl.className = '';
+  const aiStatusEl = document.getElementById('aiGradingStatus');
+  aiStatusEl.classList.add('hidden');
+  aiStatusEl.innerHTML = '';
+  document.getElementById('aiGradingResult').innerHTML = '';
+  renderBackgroundGradingNote();
+}
+
+// An AI grade takes ~3 minutes, so it's entirely possible to start one and
+// switch tabs before it lands. Rather than let it render into the wrong
+// panel, say plainly that it's still running and where it will show up.
+function renderBackgroundGradingNote() {
+  const el = document.getElementById('grading-background-note');
+  if (gradingInFlightFor && gradingInFlightFor !== currentSessionType) {
+    el.innerHTML = `<strong>Still grading a ${escapeHtml(gradingInFlightFor)} session in the background.</strong> ` +
+      `It'll appear under Recent ${escapeHtml(gradingInFlightFor)} submissions on that tab when it finishes — leaving this page cancels it.`;
+    el.classList.remove('hidden');
+  } else {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+  }
 }
 
 /* ---------------------- Sheets helpers ---------------------- */
@@ -1098,7 +1450,7 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
   const btn = document.getElementById('grade-submit-btn');
   const audioFile = document.getElementById('g-audio').files[0];
   if (!audioFile) { statusEl.textContent = 'Please choose an audio file.'; statusEl.className = 'err'; return; }
-  const sessionTypeForValidation = CURRENT_SESSION_TYPE;
+  const sessionTypeForValidation = currentSessionType;
   const gradeMaxForValidation = SESSION_MAX_POSSIBLE[sessionTypeForValidation] || 110;
   const rawGradeVal = document.getElementById('g-grade').value.trim();
   if (rawGradeVal !== '') {
@@ -1124,7 +1476,10 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     const fileInfo = await driveGetFile(fileMeta.id, 'webViewLink');
 
     statusEl.textContent = 'Saving grade…';
-    const sessionType = CURRENT_SESSION_TYPE;
+    // Captured once here rather than read again later: the tab can be switched
+    // while the ~3-minute AI grade runs, and this submission must stay stamped
+    // with the session type it was actually started under.
+    const sessionType = currentSessionType;
     const traineeName = document.getElementById('g-trainee').value;
     const graderName = document.getElementById('g-grader').value;
     const gradeMax = SESSION_MAX_POSSIBLE[sessionType] || 110;
@@ -1233,8 +1588,20 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
   let progressTimer = null;
   const startedAt = Date.now();
 
+  // The grading panel is shared between the live session-type tabs, so a grade
+  // started on one tab must not paint its progress or its result onto another.
+  // When the tab has moved on, the run keeps going and lands in that tab's
+  // Recent Submissions instead — nothing is lost, it just isn't shown here.
+  gradingInFlightFor = sessionType;
+  renderBackgroundGradingNote();
+  const onOwnTab = () => currentSessionType === sessionType;
+  function finish() {
+    gradingInFlightFor = null;
+    renderBackgroundGradingNote();
+  }
+
   function renderProgress() {
-    if (!statusEl) return;
+    if (!statusEl || !onOwnTab()) return;
     const elapsed = (Date.now() - startedAt) / 1000;
     const pct = estimatedProgressPercent(elapsed);
     const label = elapsed <= ESTIMATED_GRADING_SECONDS
@@ -1271,11 +1638,19 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
     });
     const result = await response.json();
     stopProgress();
+    finish();
 
     if (!result.ok) {
-      if (statusEl) statusEl.innerHTML = escapeHtml('AI grading failed: ' + result.error);
+      if (statusEl && onOwnTab()) statusEl.innerHTML = escapeHtml('AI grading failed: ' + result.error);
       console.error('AI grading error:', result.error);
       return null;
+    }
+
+    if (!onOwnTab()) {
+      // Landed while a different session type was on screen — put it where the
+      // person will actually find it rather than dropping it into this panel.
+      loadRecentLog();
+      return result;
     }
 
     if (statusEl) {
@@ -1289,7 +1664,8 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
     return result;
   } catch (err) {
     stopProgress();
-    if (statusEl) statusEl.innerHTML = escapeHtml('AI grading request failed: ' + err.message);
+    finish();
+    if (statusEl && onOwnTab()) statusEl.innerHTML = escapeHtml('AI grading request failed: ' + err.message);
     console.error(err);
     return null;
   }
@@ -1314,10 +1690,20 @@ const SESSION_MAX_POSSIBLE = { 'Team On-Site Day': 50, 'Training Day': 110 };
    different jump points depending on how it was opened. Change both. */
 const CLIP_MERGE_WINDOW_SECONDS = 20;
 const MAX_CLIPS_PER_SECTION = 3;
-// Gemini's audio timestamps land near the right moment, not on it. Starting
-// playback slightly early is recoverable — you hear a little run-up; starting
-// late means missing the exchange entirely and not knowing you missed it.
-const CLIP_PREROLL_SECONDS = 10;
+// Gemini's audio timestamps land near the right moment, not on it — so
+// playback starts slightly before the cited time. You hear a little run-up;
+// starting late means missing the exchange entirely and not knowing you did.
+//
+// Measured 2026-08-13 against a 2:22 test clip, 5 citations checked by hand:
+// off by +4s, +4s, +3s, +24s, +23s. Two things came out of that. First, EVERY
+// error pointed the same way — the AI cites EARLY, the real moment is always
+// LATER — so a big pre-roll was pushing the listener further from the moment
+// in every single case, never toward it. Hence 3s, not the original 10s.
+// Second, the two 23s misses were both after a point where the model's clock
+// appears to have slipped ~20s at once (suspected long silence in the audio);
+// that is not something a fixed offset can fix, which is what the ±15s nudge
+// controls on the player are for. Re-measure before changing this number.
+const CLIP_PREROLL_SECONDS = 3;
 
 // "14:22" -> 862, "1:02:33" -> 3753. null for anything that isn't a real
 // timestamp, so a malformed clip is dropped rather than rendered as a jump
@@ -1447,6 +1833,7 @@ function wireEvidencePlayer(container, fileId) {
   const statusEl = shell.querySelector('.ai-audio-status');
   const hintEl = shell.querySelector('.ai-audio-hint');
   const loadBtn = shell.querySelector('.ai-audio-load');
+  const nudgeRow = shell.querySelector('.ai-audio-nudge');
   let audioEl = null;
   let loadPromise = null;
   let objectUrl = null;
@@ -1497,6 +1884,7 @@ function wireEvidencePlayer(container, fileId) {
       el.src = objectUrl;
       slot.appendChild(el);
       audioEl = el;
+      if (nudgeRow) nudgeRow.classList.remove('hidden');
       setStatus('Click any timestamp below to jump there.');
       return el;
     })();
@@ -1521,14 +1909,36 @@ function wireEvidencePlayer(container, fileId) {
       }
       el.currentTime = Math.max(0, seconds - CLIP_PREROLL_SECONDS);
       el.play().catch(() => { /* autoplay blocked — the player is still cued up */ });
-      const quoteLine = quote ? ` — listen for <span class="ai-audio-quote">“${escapeHtml(quote)}”</span>` : '';
-      setStatus(`Playing from about ${escapeHtml(at)}${quoteLine}. Started ${CLIP_PREROLL_SECONDS}s early on purpose — the AI's timestamps are close, not exact.`);
+      // The quote is what makes a miss recoverable: measured against a real
+      // clip, the AI always cited EARLY, so if these words haven't come up yet
+      // the moment is still ahead — hence "+15s" sitting right next to it.
+      const quoteLine = quote ? ` Listen for <span class="ai-audio-quote">“${escapeHtml(quote)}”</span> —` : ' —';
+      setStatus(`Playing from about ${escapeHtml(at)}.${quoteLine} if you haven't heard it yet, it's most likely still ahead: nudge forward.`);
     };
     if (el.readyState >= 1) apply();
     else el.addEventListener('loadedmetadata', apply, { once: true });
   }
 
   loadBtn.addEventListener('click', () => { ensureLoaded().catch(() => {}); });
+
+  // Nudge controls. The AI's clock can slip ~20s at a stretch of silence and
+  // never recover, which no fixed offset can correct for — so rather than
+  // pretending the number is right, landing near it and letting a manager step
+  // forward in one click is the honest fix. Skewed toward forward because
+  // every measured citation ran early, never late.
+  if (nudgeRow) {
+    nudgeRow.addEventListener('click', (event) => {
+      const btn = event.target.closest('.ai-nudge-btn');
+      if (!btn || !audioEl) return;
+      event.stopPropagation();
+      const delta = Number(btn.dataset.nudge) || 0;
+      const target = audioEl.currentTime + delta;
+      const max = Number.isFinite(audioEl.duration) ? audioEl.duration : target;
+      audioEl.currentTime = Math.min(Math.max(0, target), max);
+      audioEl.play().catch(() => {});
+      setStatus(`Now at ${escapeHtml(formatClipTime(audioEl.currentTime))}.`);
+    });
+  }
 
   const onChipClick = async (event) => {
     const chip = event.target.closest('.clip-chip');
@@ -1666,6 +2076,12 @@ function renderAiGradingResult(result, container, audioFileId) {
             : 'This session was graded before evidence timestamps existed, so there are no jump points — but you can still listen here.'}</span>
         </div>
         <div class="ai-audio-slot"></div>
+        <div class="ai-audio-nudge hidden">
+          <span class="ai-nudge-label">Not there?</span>
+          <button type="button" class="ai-nudge-btn" data-nudge="-15">&minus;15s</button>
+          <button type="button" class="ai-nudge-btn" data-nudge="15">+15s</button>
+          <button type="button" class="ai-nudge-btn" data-nudge="30">+30s</button>
+        </div>
         <div class="ai-audio-status"></div>
       </div>`
     : '';
@@ -1930,8 +2346,18 @@ async function loadRecentLog() {
       });
     });
 
-    submissions.sort((a, b) => a.order - b.order);
-    const body = submissions.slice(-10).reverse();
+    // Each grading tab is its own workspace, so only show sessions of the type
+    // the tab is currently pointed at (column C). Rows written before session
+    // types were split across tabs, or with the type blank, are treated as
+    // Training Day — that's the only type the app ever logged until now.
+    const scopedSubmissions = submissions.filter(s => (s.type || 'Training Day') === currentSessionType);
+
+    scopedSubmissions.sort((a, b) => a.order - b.order);
+    const body = scopedSubmissions.slice(-10).reverse();
+    if (!body.length) {
+      wrap.innerHTML = `<div class="empty-state">No ${escapeHtml(currentSessionType)} submissions yet.</div>`;
+      return;
+    }
 
     // Pre-parse each merged submission's AI result (from its AI row's column S) so we know which are expandable.
     const parsedAi = body.map(s => s.aiRow ? parseAiResultFromRow(s.aiRow) : null);
