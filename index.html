@@ -482,7 +482,12 @@
   }
   .log-cert-notice .notice-text { flex: 1 1 260px; }
   .log-cert-notice .notice-err { flex: 1 1 100%; color: var(--critical); }
+  .log-cert-notice .notice-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .log-cert-notice .btn { padding: 7px 14px; font-size: 12px; white-space: nowrap; }
+  /* Declining the offer is the quieter of the two answers, and should look it. */
+  .log-cert-notice .btn.ghost {
+    background: transparent; color: var(--text-secondary); border: 1px solid var(--border);
+  }
   .signed-out-lock { text-align: center; padding: 56px 24px 48px; color: var(--text-secondary); }
   .signed-out-lock .lock-icon { width: 56px; height: 56px; opacity: 0.9; margin-bottom: 18px; }
   .signed-out-lock .lock-title { margin: 0 0 10px; font-size: 15px; }
@@ -3445,10 +3450,36 @@ function showLogDeleteError(message) {
    that because an unrelated row was deleted would be worse than the problem it
    fixes. So it rules out the cases it can (the person isn't certified; the
    deleted grade wasn't a pass; another passing grade is still on file) and
-   otherwise puts the decision on screen with one button behind it. */
+   otherwise puts the decision on screen with one button behind it.
+
+   Because it only ever asks, the ask has to actually get seen and has to stay
+   put until it's answered — an offer that scrolls past unnoticed, or that the
+   next re-render quietly throws away, leaves the Dashboard wrong with no way
+   back to the button except editing the Roster Sheet by hand. Hence the two
+   things below: it scrolls itself into view, and it's held in pendingUncertify
+   and re-drawn after every render of this list rather than living only in the
+   DOM. */
+let pendingUncertify = null;
+
 function clearUncertifyOffer() {
+  pendingUncertify = null;
   const bar = document.getElementById('log-cert-notice');
   if (bar) bar.remove();
+}
+
+// Re-draw an offer that a re-render (Refresh, a finished AI grade, coming back
+// to this tab) wiped out of the DOM. Scoped to the tab it belongs to — a
+// Training Day offer has no business sitting over the Team On-Site Day list —
+// and dropped silently if the certification has gone away in the meantime.
+function restoreUncertifyOffer() {
+  if (!pendingUncertify) return;
+  if (pendingUncertify.sessionType !== currentSessionType) return;
+  if (!isAlreadyCertified(pendingUncertify.name, pendingUncertify.sessionType)) {
+    pendingUncertify = null;
+    return;
+  }
+  if (document.getElementById('log-cert-notice')) return;
+  showUncertifyOffer(pendingUncertify.name, pendingUncertify.sessionType, false);
 }
 
 function offerUncertifyAfterDelete(sub) {
@@ -3471,9 +3502,12 @@ function offerUncertifyAfterDelete(sub) {
   showUncertifyOffer((person && person['Name']) || name, type);
 }
 
-function showUncertifyOffer(name, sessionType) {
+function showUncertifyOffer(name, sessionType, scrollIntoView = true) {
   const wrap = document.getElementById('recent-log-wrap');
   if (!wrap) return;
+  // Remembered outside the DOM so a re-render can put it back (restoreUncertifyOffer).
+  pendingUncertify = { name, sessionType };
+
   const bar = document.createElement('div');
   bar.id = 'log-cert-notice';
   bar.className = 'log-cert-notice';
@@ -3482,11 +3516,16 @@ function showUncertifyOffer(name, sessionType) {
   text.className = 'notice-text';
   text.innerHTML = `<strong>${escapeHtml(name)}</strong> is still marked certified for ` +
     `${escapeHtml(sessionType)} on the Dashboard, and that was the last passing grade on file. ` +
-    `If the certification came from it, set it back — if it was signed off some other way, leave it alone.`;
+    `Deleting a grade doesn't change the Dashboard on its own — the tick lives on the Roster. ` +
+    `If the certification came from that grade, set it back here; if it was signed off some other ` +
+    `way, leave it alone.`;
 
   const err = document.createElement('div');
   err.className = 'notice-err';
   err.hidden = true;
+
+  const actions = document.createElement('div');
+  actions.className = 'notice-actions';
 
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -3501,10 +3540,11 @@ function showUncertifyOffer(name, sessionType) {
         throw new Error('your Google sign-in has expired. Sign in again and retry.');
       }
       await uncertifyOnRoster(name, sessionType);
+      pendingUncertify = null;
       bar.classList.add('done');
       text.innerHTML = `<strong>${escapeHtml(name)}</strong> is no longer certified for ` +
         `${escapeHtml(sessionType)} on the Dashboard.`;
-      btn.remove();
+      actions.remove();
     } catch (e) {
       console.error(e);
       // The offer stays on screen so it can be retried — the Roster write is a
@@ -3516,10 +3556,28 @@ function showUncertifyOffer(name, sessionType) {
     }
   });
 
+  // Declining is a real answer, and without a way to give it the only ways out
+  // of the bar were to reload (which loses the button for good) or to leave it
+  // sitting there. Waving it off is deliberate, so it clears pendingUncertify
+  // and the offer doesn't come back on the next render.
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.className = 'btn ghost';
+  dismiss.textContent = 'Leave it as is';
+  dismiss.addEventListener('click', () => clearUncertifyOffer());
+
+  actions.appendChild(btn);
+  actions.appendChild(dismiss);
   bar.appendChild(text);
   bar.appendChild(err);
-  bar.appendChild(btn);
+  bar.appendChild(actions);
   wrap.prepend(bar);
+  // The stale badge is on a different tab from the delete button, so the moment
+  // this appears is the only moment it's guaranteed to be looked at. Plain
+  // scroll, not behavior: 'smooth' — smooth scrolling is a silent no-op in some
+  // browsers, and a notice that exists so it can't be missed must not depend on
+  // an animation that might not run.
+  if (scrollIntoView) bar.scrollIntoView({ block: 'center' });
 }
 
 // Reads the whole Grading Log and merges it into one submission per session.
@@ -3610,6 +3668,9 @@ async function loadRecentLog() {
     const body = scopedSubmissions.slice(-10).reverse();
     if (!body.length) {
       wrap.innerHTML = `<div class="empty-state">No ${escapeHtml(currentSessionType)} submissions yet.</div>`;
+      // An un-answered "should this certification come back down?" survives the
+      // list emptying out — deleting the last grade is exactly when it's raised.
+      restoreUncertifyOffer();
       return;
     }
 
@@ -3647,6 +3708,10 @@ async function loadRecentLog() {
     });
     html += '</tbody></table>';
     wrap.innerHTML = html;
+    // innerHTML above just wiped anything sitting over the list, including an
+    // un-answered offer to take a certification back down. Put it back rather
+    // than losing the only button that can do it.
+    restoreUncertifyOffer();
 
     // Wire up click-to-expand on rows that have an AI result, one open at a time.
     body.forEach((s, i) => {
