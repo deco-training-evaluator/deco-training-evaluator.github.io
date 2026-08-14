@@ -1533,19 +1533,41 @@ function onSignedIn() {
    on in front of an audience.
 
    Keep any addition SHORT. The banner hides this line below 1220px rather than
-   wrapping it, and a long quote crowds the sign-in button well before that. */
+   wrapping it, and a long quote crowds the sign-in button well before that.
+   Nothing here runs past ~60 characters, which is the measured ceiling.
+
+   Where they come from, so the next person doesn't have to re-check: Seneca's
+   two are Letters 7 and 76; Aristotle is Nicomachean Ethics II; Franklin's
+   three are Poor Richard's and his letters; Confucius is Analects 2.15 and
+   Plato is Republic II (both Legge/Jowett, out of copyright); Lao Tzu is Tao
+   Te Ching 33 and 64; Plutarch is the Moralia and the Life of Sertorius;
+   Ovid is Ars Amatoria II; Cicero is De Finibus V; Socrates is Plato's
+   Apology; Epictetus is Discourses 1.24 (Long); Publilius Syrus' two are his
+   Maxims; Thomas Fuller is Gnomologia (1732); Virgil is Aeneid V; Hippocrates
+   is Aphorisms I. Deliberately absent: anything that only ever appears on a
+   poster. */
 const HEADER_QUOTES = [
   { text: 'While we teach, we learn.',                                  who: 'Seneca' },
   { text: 'What we learn to do, we learn by doing.',                    who: 'Aristotle' },
   { text: 'Well done is better than well said.',                        who: 'Benjamin Franklin' },
+  { text: 'Learning without thought is labour lost.',                   who: 'Confucius' },
   { text: 'Practice is the best of all instructors.',                   who: 'Publilius Syrus' },
   { text: 'Knowing others is wisdom; knowing yourself is enlightenment.', who: 'Lao Tzu' },
+  { text: 'The beginning is the most important part of the work.',      who: 'Plato' },
   { text: 'Character is simply habit long continued.',                  who: 'Plutarch' },
+  { text: 'Nothing is stronger than habit.',                            who: 'Ovid' },
   { text: 'A journey of a thousand miles begins with a single step.',   who: 'Lao Tzu' },
+  { text: 'The beginnings of all things are small.',                    who: 'Cicero' },
   { text: 'The unexamined life is not worth living.',                   who: 'Socrates' },
+  { text: 'As long as you live, keep learning how to live.',            who: 'Seneca' },
   { text: 'Energy and persistence conquer all things.',                 who: 'Benjamin Franklin' },
+  { text: 'Difficulties are things that show what men are.',            who: 'Epictetus' },
   { text: 'Perseverance is more prevailing than violence.',             who: 'Plutarch' },
-  { text: 'Little strokes fell great oaks.',                            who: 'Benjamin Franklin' }
+  { text: 'No one knows what he can do until he tries.',                who: 'Publilius Syrus' },
+  { text: 'All things are difficult before they are easy.',             who: 'Thomas Fuller' },
+  { text: 'Little strokes fell great oaks.',                            who: 'Benjamin Franklin' },
+  { text: 'They can because they think they can.',                      who: 'Virgil' },
+  { text: 'Life is short, the art long.',                               who: 'Hippocrates' }
 ];
 
 /* Step through the list one per app open rather than picking at random, so it
