@@ -824,9 +824,16 @@
     margin-bottom: 22px;
   }
   .stat-strip:empty { display: none; }
+  /* Centred, not left-aligned. Four cards of very different text lengths ragged
+     down the left read as four unrelated boxes; centred, the numbers line up
+     across the strip and it reads as one instrument panel. */
   .stat-card {
     position: relative;
-    padding: 18px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 20px 20px 22px;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: var(--surface-1);
@@ -850,6 +857,7 @@
   .stat-card-value {
     display: flex;
     align-items: baseline;
+    justify-content: center;
     gap: 6px;
     font-size: 34px;
     font-weight: 700;
@@ -859,14 +867,19 @@
   }
   .stat-card-of { font-size: 15px; font-weight: 600; color: var(--text-muted); letter-spacing: 0; }
   .stat-card-sub { margin-top: 9px; font-size: 11.5px; line-height: 1.45; color: var(--text-secondary); }
+  /* The cards sit in a grid, so they're all as tall as the tallest — without
+     this the bar floats mid-card on the short ones instead of sitting on the
+     floor, and the strip loses the shared baseline that centring bought. */
+  .stat-card-sub { margin-bottom: auto; }
   /* A count means little without the denominator beside it, so the ones that
      have a denominator get a bar. Purely a restatement of the numbers above —
      it's there to be readable at a glance across the room, not to add data. */
   .stat-card-bar {
+    width: 100%;
     height: 5px;
-    margin-top: 12px;
+    margin-top: 14px;
     border-radius: 999px;
-    background: var(--sunken);
+    background: var(--gridline);
     border: 1px solid var(--border);
     overflow: hidden;
   }
