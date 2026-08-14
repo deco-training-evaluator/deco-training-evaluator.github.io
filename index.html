@@ -14,6 +14,32 @@
      close system/Google-Fonts fallback stack in case that's ever unreachable. -->
 <link href="https://fonts.cdnfonts.com/css/caviar-dreams" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer onload="onGsiLoad()"></script>
+<!-- Theme resolution, deliberately INLINE and at the top of <head>, ahead of the
+     stylesheet. It has to run before the first paint: done from the main script at
+     the bottom of the page instead, the browser would paint the default theme and
+     then repaint, which is a white flash on every load for anyone who chose dark.
+     Kept tiny and dependency-free for the same reason.
+     localStorage is wrapped because it THROWS rather than returning null in a
+     private window or with site data blocked — the same lesson as saveToken (see
+     CLAUDE.md). A blocked store costs only the memory of the choice between
+     reloads, so it must never be allowed to break the page. -->
+<script>
+  window.DECO_THEME = (function () {
+    var saved = null;
+    try { saved = localStorage.getItem('deco-theme'); } catch (e) { saved = null; }
+    // Anything that isn't one of the two known values is treated as "no choice
+    // made" rather than trusted, so a stale or hand-edited key can't wedge the app
+    // into a theme with no tokens behind it.
+    var explicit = (saved === 'light' || saved === 'dark') ? saved : null;
+    var theme = explicit;
+    if (!theme) {
+      var mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+      theme = (mq && mq.matches) ? 'dark' : 'light';
+    }
+    document.documentElement.setAttribute('data-theme', theme);
+    return { current: theme, explicit: explicit, stored: saved !== null };
+  })();
+</script>
 <style>
   :root {
     color-scheme: light;
@@ -82,39 +108,53 @@
     --font-display:     'Caviar Dreams', 'Baloo 2', 'Trebuchet MS', var(--font-body);
     --ease:             cubic-bezier(0.22, 0.61, 0.36, 1);
   }
-  @media (prefers-color-scheme: dark) {
-    :root:where(:not([data-theme="light"])) {
-      color-scheme: dark;
-      /* Same ladder in reverse: the page is the darkest thing, a card sits
-         above it, a well sits below it. All three carry a little of the brand
-         warmth so the dark theme doesn't go blue-grey.
-         Lifted off near-black on 2026-08-14 alongside the light theme. The old
-         values sat so close to #000 that the whole app read as switched off, and
-         the card-to-page step had almost nothing to work with; these keep the
-         same ordering with room between the rungs (card-to-page 1.12), and white
-         text is still 16.8:1 on a card. */
-      --page:           #131110;
-      --surface-1:      #201d17;
-      --sunken:         #191712;
-      --text-primary:   #ffffff;
-      --text-secondary: #cdc6b8;
-      --text-muted:     #a49b8c;
-      --gridline:       #37312a;
-      --border:         rgba(255,255,255,0.12);
-      --border-strong:  rgba(255,255,255,0.24);
-      --good:           #35c46a;
-      --warning:        #fdba31;
-      --critical:       #f07171;
-      --accent:         var(--brand-orange);
-      --pending:        #b7ac95;
-      /* Shadows barely register on near-black, so depth in dark mode comes
-         mostly from the border highlight on .panel — these stay subtle rather
-         than being scaled up into muddy halos. */
-      --shadow-sm:      0 1px 2px rgba(0,0,0,0.40);
-      --shadow-md:      0 2px 4px rgba(0,0,0,0.40), 0 12px 28px -16px rgba(0,0,0,0.80);
-      --shadow-lg:      0 4px 8px rgba(0,0,0,0.45), 0 28px 56px -28px rgba(0,0,0,0.90);
-      --shadow-pop:     0 4px 10px rgba(0,0,0,0.50), 0 20px 40px -20px rgba(0,0,0,0.95);
-    }
+  /* ---- Dark theme ----
+     Driven by the data-theme attribute, NOT by @media (prefers-color-scheme: dark),
+     and that distinction is the whole reason the header's theme toggle can work.
+     Tokens that live only inside the media query can be overridden to force LIGHT
+     (that's what the old :not([data-theme="light"]) guard did) but there is no way
+     to force DARK on a machine set to light — the block simply never matches. That
+     was the bug Jordan hit on 2026-08-14: switching Windows to light mode did
+     nothing, because the app had no way to be told.
+     The attribute is set by the inline script at the top of <head>, before the
+     first paint, from a saved choice or else the OS preference — so the default
+     behaviour is exactly what it was, and there's no flash of the wrong theme.
+     There is deliberately NO duplicate media-query copy of these values. The usual
+     argument for one is a no-JavaScript fallback, and this app has nothing to fall
+     back to: sign-in, the roster, grading and every panel are JS. Two copies of
+     forty tokens would be forty chances to drift, guarding a page that would never
+     render anyway. */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    /* Same ladder in reverse: the page is the darkest thing, a card sits
+       above it, a well sits below it. All three carry a little of the brand
+       warmth so the dark theme doesn't go blue-grey.
+       Lifted off near-black on 2026-08-14 alongside the light theme. The old
+       values sat so close to #000 that the whole app read as switched off, and
+       the card-to-page step had almost nothing to work with; these keep the
+       same ordering with room between the rungs (card-to-page 1.12), and white
+       text is still 16.8:1 on a card. */
+    --page:           #131110;
+    --surface-1:      #201d17;
+    --sunken:         #191712;
+    --text-primary:   #ffffff;
+    --text-secondary: #cdc6b8;
+    --text-muted:     #a49b8c;
+    --gridline:       #37312a;
+    --border:         rgba(255,255,255,0.12);
+    --border-strong:  rgba(255,255,255,0.24);
+    --good:           #35c46a;
+    --warning:        #fdba31;
+    --critical:       #f07171;
+    --accent:         var(--brand-orange);
+    --pending:        #b7ac95;
+    /* Shadows barely register on near-black, so depth in dark mode comes
+       mostly from the border highlight on .panel — these stay subtle rather
+       than being scaled up into muddy halos. */
+    --shadow-sm:      0 1px 2px rgba(0,0,0,0.40);
+    --shadow-md:      0 2px 4px rgba(0,0,0,0.40), 0 12px 28px -16px rgba(0,0,0,0.80);
+    --shadow-lg:      0 4px 8px rgba(0,0,0,0.45), 0 28px 56px -28px rgba(0,0,0,0.90);
+    --shadow-pop:     0 4px 10px rgba(0,0,0,0.50), 0 20px 40px -20px rgba(0,0,0,0.95);
   }
   * { box-sizing: border-box; accent-color: var(--brand-orange); }
   body {
@@ -226,6 +266,19 @@
     color: rgba(255,255,255,0.58);
   }
   #auth-area { grid-column: 3; display: flex; align-items: center; gap: 10px; justify-self: end; }
+  /* The toggle sits in the header, which is near-black in BOTH themes, so it needs
+     no theme-specific styling of its own — it inherits header .btn.secondary and
+     looks identical either way. Deliberately not an icon-only button: a lone sun or
+     moon leaves people guessing whether it shows the current theme or the one
+     they'd switch to, and this app is used by managers, not designers. The label
+     names the destination ("Dark" = press for dark), and the two are kept in step by
+     renderThemeToggle() so they can never say different things. */
+  #theme-toggle { gap: 7px; }
+  #theme-toggle-icon { font-size: 13px; line-height: 1; }
+  /* Below 700px the header has already dropped the app name, and the sign-in
+     controls need the room more than the word does. The icon and the accessible
+     label both survive, so the button stays usable and still announces itself. */
+  @media (max-width: 700px) { #theme-toggle-label { display: none; } }
   @media (max-width: 1220px) { .header-quote { display: none; } }
   @media (max-width: 700px) { .brand-divider, .brand-appname { display: none; } }
   /* The signed-in state is a status, not a label — a dot plus a chip reads as
@@ -406,11 +459,9 @@
   /* In dark mode a shadow on near-black does nothing, so the card is separated
      from the page by a 1px highlight along its top edge instead — the standard
      trick, and the reason dark cards here read as raised rather than as holes. */
-  @media (prefers-color-scheme: dark) {
-    :root:where(:not([data-theme="light"])) .panel {
-      background-image: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 120px);
-      border-color: rgba(255,255,255,0.08);
-    }
+  :root[data-theme="dark"] .panel {
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 120px);
+    border-color: rgba(255,255,255,0.08);
   }
   .note {
     position: relative;
@@ -431,10 +482,8 @@
      the box that carries most of this app's explanations. Dark mode gets a
      tint of the brand ORANGE instead, which stays dark and keeps the same warm
      "this is a note" cast (8.8:1). Don't collapse the two back into one rule. */
-  @media (prefers-color-scheme: dark) {
-    :root:where(:not([data-theme="light"])) .note {
-      background: color-mix(in srgb, var(--brand-orange) 11%, var(--surface-1));
-    }
+  :root[data-theme="dark"] .note {
+    background: color-mix(in srgb, var(--brand-orange) 11%, var(--surface-1));
   }
   /* The accent edge is an inset bar with rounded ends rather than a border-left
      running corner to corner — it sits inside the rounded card instead of
@@ -867,6 +916,12 @@
      than a stepper, so the browser's up/down spinner arrows are hidden. */
   #g-grade::-webkit-outer-spin-button, #g-grade::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   #g-grade[type=number] { -moz-appearance: textfield; }
+  /* The box a picker reveals for a value that isn't on its list (the grader who
+     isn't on the Roster yet), and the small line under a field that explains
+     itself. --text-secondary rather than --text-muted: muted doesn't clear AA
+     on the sunken panel these sit on. */
+  .field-inline-new { margin-top: 8px; }
+  .field-hint { font-size: 11.5px; color: var(--text-secondary); margin-top: 6px; line-height: 1.45; }
   .radio-row { display: flex; gap: 16px; }
   .radio-row label { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; }
   .check-row {
@@ -1094,10 +1149,8 @@
     box-shadow: var(--shadow-md);
     overflow: hidden;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:where(:not([data-theme="light"])) .stat-card {
-      background-image: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 90px);
-    }
+  :root[data-theme="dark"] .stat-card {
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 90px);
   }
   /* Same reasoning as thead th — at 10px uppercase this is the only thing
      saying what the big number underneath it counts. */
@@ -1276,10 +1329,8 @@
   .ai-verdict.is-pass    { --verdict-color: var(--good); }
   .ai-verdict.is-fail    { --verdict-color: var(--critical); }
   .ai-verdict.is-unknown { --verdict-color: var(--pending); }
-  @media (prefers-color-scheme: dark) {
-    :root:where(:not([data-theme="light"])) .ai-verdict {
-      background-image: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 110px);
-    }
+  :root[data-theme="dark"] .ai-verdict {
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 110px);
   }
   .ai-verdict-eyebrow {
     display: block;
@@ -1984,6 +2035,9 @@
   </div>
   <p class="header-quote" id="header-quote"></p>
   <div id="auth-area">
+    <button id="theme-toggle" class="btn secondary" type="button">
+      <span id="theme-toggle-icon" aria-hidden="true">☾</span><span id="theme-toggle-label">Dark</span>
+    </button>
     <span id="auth-status">Not signed in</span>
     <button id="signin-btn" class="btn" disabled>Loading sign-in…</button>
     <button id="signout-btn" class="btn secondary hidden">Sign out</button>
@@ -2148,7 +2202,16 @@
           </div>
           <div class="field">
             <label for="g-grader">Grader (your name)</label>
-            <input id="g-grader" type="text" required placeholder="e.g. Jordan Evans">
+            <!-- A picker over the people who actually deliver these sessions —
+                 district and operations managers off the Roster — rather than a
+                 free-text box: a typed name is a typo waiting to happen, and the
+                 same grader's sessions landing under two spellings makes the log
+                 harder to read than it needs to be. See populateGraderDropdown. -->
+            <select id="g-grader" required>
+              <option value="">Select a grader…</option>
+            </select>
+            <input id="g-grader-other" class="field-inline-new hidden" type="text" placeholder="Type the grader's name" aria-label="Grader's name">
+            <div id="g-grader-hint" class="field-hint hidden"></div>
             <label class="check-row" for="g-did-not-attend">
               <input type="checkbox" id="g-did-not-attend">
               No one attended to grade this manually — just AI-grade the audio
@@ -2600,6 +2663,65 @@ function onGsiLoad() {
   }
 }
 
+/* ---- Theme toggle ----
+   The attribute itself is already set by the inline script in <head>; this only
+   owns the button and the OS-change listener. window.DECO_THEME is the single
+   source of truth for which theme is on and whether the choice was deliberate,
+   so nothing here re-reads localStorage or re-queries matchMedia to find out. */
+function applyTheme(theme, remember) {
+  if (theme !== 'light' && theme !== 'dark') return;
+  document.documentElement.setAttribute('data-theme', theme);
+  DECO_THEME.current = theme;
+  if (remember) {
+    DECO_THEME.explicit = theme;
+    // A blocked store costs the memory of the choice across reloads and nothing
+    // else — the theme is already applied above, so this must not throw past here.
+    try { localStorage.setItem('deco-theme', theme); } catch (e) {}
+  }
+  renderThemeToggle();
+}
+
+// The button always names where a press will take you, never where you are.
+function renderThemeToggle() {
+  const btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  const next = DECO_THEME.current === 'dark' ? 'light' : 'dark';
+  btn.querySelector('#theme-toggle-icon').textContent = next === 'dark' ? '☾' : '☀';
+  btn.querySelector('#theme-toggle-label').textContent = next === 'dark' ? 'Dark' : 'Light';
+  // Set on the button rather than left to the visible text, because that text is
+  // hidden below 700px and the icon is a decorative glyph with aria-hidden on it.
+  btn.setAttribute('aria-label', `Switch to ${next} theme`);
+  btn.title = `Switch to ${next} theme`;
+}
+
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  applyTheme(DECO_THEME.current === 'dark' ? 'light' : 'dark', true);
+});
+
+/* Follow the OS, but ONLY until someone picks a theme here. After an explicit
+   choice the app stops listening to the machine — otherwise changing Windows to
+   light would silently undo a manager's decision to work in dark, which is the
+   mirror image of the bug this whole feature exists to fix. */
+if (window.matchMedia) {
+  const schemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  // Reads the query object rather than the event's own .matches. Real browsers
+  // pass a MediaQueryListEvent that carries it, so both work in production — but
+  // the query is the actual state, and taking it from there means the handler
+  // behaves correctly however it was invoked, including from a synthetic event.
+  const onSchemeChange = () => {
+    if (DECO_THEME.explicit) return;
+    applyTheme(schemeQuery.matches ? 'dark' : 'light', false);
+  };
+  // Exposed ONLY so this path can be exercised in a test browser: the DevTools /
+  // CDP colour-scheme emulation changes what the query reports without dispatching
+  // a change event, so there is otherwise no way to prove this branch runs at all.
+  window.DECO_THEME.__onSchemeChange = onSchemeChange;
+  if (schemeQuery.addEventListener) schemeQuery.addEventListener('change', onSchemeChange);
+  else if (schemeQuery.addListener) schemeQuery.addListener(onSchemeChange);
+}
+
+renderThemeToggle();
+
 document.getElementById('signin-btn').addEventListener('click', () => {
   tokenClient.requestAccessToken({ prompt: 'consent' });
 });
@@ -2867,6 +2989,9 @@ function resetGradingPanel() {
   const form = document.getElementById('grading-form');
   form.reset();
   ['g-grade', 'g-feedback', 'g-grader', 'g-all-sections-pass'].forEach(id => { document.getElementById(id).disabled = false; });
+  // reset() puts the picker back on its placeholder but leaves the "not listed"
+  // box showing, so it's told to catch up.
+  syncGraderOtherField(false);
   renderCertPreview();
   prereqOverride = null;
   prereqBlockedSubmit = false;
@@ -2965,6 +3090,7 @@ async function loadRoster() {
       });
     populateFilterOptions();
     populateTraineeDropdown();
+    populateGraderDropdown();
     renderDashboardTable();
     // A Refresh after someone ticks a step on the Roster should take the warning
     // away without the person having to be re-picked.
@@ -4033,6 +4159,93 @@ function populateTraineeDropdown() {
   sel.value = keep;
 }
 
+/* ---------------- Who can be picked as the grader ----------------
+   A training session is delivered and graded by a district or operations
+   manager, so the Grader field lists exactly those people off the Roster.
+
+   Roles are typed into the Roster by hand, so the match is deliberately loose —
+   lower-cased, whitespace collapsed, and a substring — so "District Manager",
+   "district manager " and "Senior District Manager" all land here. */
+const GRADER_ROLE_KEYWORDS = ['district manager', 'operations manager', 'ops manager'];
+const GRADER_OTHER_VALUE = '__other__';
+const GRADER_DID_NOT_ATTEND = 'Did not attend';
+
+function isGraderRole(role) {
+  const r = (role || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return GRADER_ROLE_KEYWORDS.some(k => r.includes(k));
+}
+
+function populateGraderDropdown() {
+  const sel = document.getElementById('g-grader');
+  const hint = document.getElementById('g-grader-hint');
+  if (!sel) return;
+  // Kept across a re-read for the same reason the trainee picker keeps its
+  // selection: this runs on every roster load, and a half-filled form shouldn't
+  // lose the name already picked. A name that has since left the Roster falls
+  // back to the empty option on its own.
+  const keep = sel.value;
+  const byName = list => list.slice().sort((a, b) => (a['Name'] || '').localeCompare(b['Name'] || ''));
+  const named = rosterRows.filter(r => (r['Name'] || '').trim());
+  const trainers = named.filter(r => isGraderRole(r['Role']));
+  // A picker with nothing in it can't be filled in, so if the Roster has no
+  // district or operations managers on it — a renamed Role column, or roles
+  // spelled some other way — everyone on it is listed and the reason is said
+  // out loud, rather than leaving the field impossible to answer.
+  const fellBack = !trainers.length && named.length > 0;
+  const people = byName(trainers.length ? trainers : named);
+  sel.innerHTML = '<option value="">Select a grader…</option>' +
+    people.map(r => {
+      const role = (r['Role'] || '').trim();
+      return `<option value="${escapeHtml(r['Name'])}">${escapeHtml(r['Name'])}${role ? ' — ' + escapeHtml(role) : ''}</option>`;
+    }).join('') +
+    // The Roster is maintained by hand and can lag reality, so a grader it
+    // hasn't caught up with yet isn't stopped from recording a session.
+    `<option value="${GRADER_OTHER_VALUE}">+ Someone not listed…</option>` +
+    // Set programmatically by the "no one attended" tick and hidden from the
+    // list, so it can't be picked as though it were a person.
+    `<option value="${GRADER_DID_NOT_ATTEND}" hidden>${GRADER_DID_NOT_ATTEND}</option>`;
+  sel.value = keep;
+  if (hint) {
+    hint.textContent = fellBack
+      ? 'No district or operations managers found on the Roster, so everyone on it is listed. Roles come from the Roster’s Role column.'
+      : '';
+    hint.classList.toggle('hidden', !fellBack);
+  }
+  syncGraderOtherField(false);
+}
+
+// The free-text box only exists while "Someone not listed" is picked, and is
+// emptied when it isn't — the same rule as the add-person form's new role and
+// region boxes, so a typed-then-abandoned name can't be what gets recorded.
+function syncGraderOtherField(focusIt) {
+  const sel = document.getElementById('g-grader');
+  const box = document.getElementById('g-grader-other');
+  if (!sel || !box) return;
+  const isOther = sel.value === GRADER_OTHER_VALUE;
+  box.classList.toggle('hidden', !isOther);
+  box.required = isOther;
+  if (!isOther) { box.value = ''; return; }
+  if (focusIt) box.focus();
+}
+
+// What the picker actually resolves to: a name off the Roster, the typed-in
+// one, or the marker the "no one attended" tick sets.
+function graderNameValue() {
+  const sel = document.getElementById('g-grader');
+  if (!sel) return '';
+  if (sel.value === GRADER_OTHER_VALUE) {
+    return document.getElementById('g-grader-other').value.trim().replace(/\s+/g, ' ');
+  }
+  return sel.value.trim();
+}
+
+document.getElementById('g-grader').addEventListener('change', () => syncGraderOtherField(true));
+// Built once at load with an empty roster, so the "not listed" option and the
+// hidden "Did not attend" one exist before anybody signs in — otherwise ticking
+// "no one attended" on a page whose roster hasn't arrived (or failed to load)
+// would set a value with no option behind it and quietly record a blank grader.
+populateGraderDropdown();
+
 // "Did not attend" — manual grading (Grade/Feedback) is optional and should
 // never block AI grading, which only needs the audio + trainee + session
 // type. This checkbox is a convenience for the common case where nobody was
@@ -4048,7 +4261,10 @@ function populateTraineeDropdown() {
   const allSectionsBox = document.getElementById('g-all-sections-pass');
   checkbox.addEventListener('change', () => {
     const checked = checkbox.checked;
-    graderInput.value = checked ? 'Did not attend' : '';
+    graderInput.value = checked ? GRADER_DID_NOT_ATTEND : '';
+    // Clears and hides the "not listed" box, whichever way this went — a name
+    // typed there must not survive under a selection that no longer shows it.
+    syncGraderOtherField(false);
     graderInput.disabled = checked;
     gradeSelect.value = '';
     gradeSelect.disabled = checked;
@@ -4424,6 +4640,17 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     renderPrereqGate({ alarm: true });
     return;
   }
+  // Read here rather than after the upload, the same reason the session type is
+  // captured early: the form is editable for the whole of a multi-minute upload,
+  // and this submission has to be stamped with what was on screen when Submit
+  // was pressed. The picker's own `required` catches an empty selection; this
+  // catches a "not listed" name that's only whitespace.
+  const graderName = graderNameValue();
+  if (!document.getElementById('g-grader').disabled && !graderName) {
+    statusEl.textContent = 'Pick who graded this session, or type their name if they are not on the list.';
+    statusEl.className = 'err';
+    return;
+  }
   if (!audioFile && rawGradeVal === '') {
     statusEl.textContent = 'Add an audio recording to grade with AI, or a manual grade, or both.';
     statusEl.className = 'err';
@@ -4465,7 +4692,6 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     // with the session type it was actually started under.
     const sessionType = currentSessionType;
     const traineeName = document.getElementById('g-trainee').value;
-    const graderName = document.getElementById('g-grader').value;
     const gradeMax = SESSION_MAX_POSSIBLE[sessionType] || 110;
     const manualGradeText = rawGradeVal !== '' ? `${rawGradeVal}/${gradeMax}` : '';
     const row = [
@@ -4524,6 +4750,9 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     document.getElementById('g-feedback').disabled = false;
     document.getElementById('g-grader').disabled = false;
     document.getElementById('g-all-sections-pass').disabled = false;
+    // Same as resetGradingPanel: reset() clears the picker but not the box it
+    // revealed, so a typed name can't be left over the next submission.
+    syncGraderOtherField(false);
     renderCertPreview();
     // The form is empty again, so an override granted for the person who was in
     // it must not still be standing for whoever is picked next.
