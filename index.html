@@ -5296,8 +5296,19 @@ function populateTraineeDropdown() {
   // half-filled form shouldn't lose the person already picked. A name that has
   // since left the Roster just falls back to the empty option.
   const keep = sel.value;
+  // A recruiting session is made by a regional manager or above — field managers
+  // do not recruit — so the picker for one lists exactly who the Recruiting
+  // Dashboard lists, off the same isRecruitingRole() test. If that leaves nobody
+  // (a renamed Role column, roles spelled some other way) it falls back to the
+  // whole Roster rather than being a picker that can't be answered — the same
+  // rule the grader picker follows.
+  let people = rosterRows;
+  if (RECRUITING_SESSION_TYPES.includes(currentSessionType)) {
+    const recruiting = rosterRows.filter(r => isRecruitingRole(r['Role']));
+    if (recruiting.length) people = recruiting;
+  }
   sel.innerHTML = '<option value="">Select a person…</option>' +
-    rosterRows.map(r => {
+    people.map(r => {
       // Flagged in the list as well as in the warning underneath it, so the
       // mistake can be avoided before it's made rather than only caught after.
       const notReady = missingPrerequisites(r['Name'], currentSessionType).length
