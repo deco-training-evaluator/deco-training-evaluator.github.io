@@ -6999,8 +6999,14 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
           // not spend the money, and by the time a pass has answered it has
           // already read the whole recording and been charged for it.
           if (attemptsThisWindow >= TRANSCRIPT_MAX_ATTEMPTS_PER_WINDOW) {
+            // plannedWindows/cursor, NOT `windows[w]`: V17 replaced the
+            // pre-computed window array with this cursor-based loop (the plan
+            // changes mid-run when a pass runs hot) and this message was left
+            // reading the old names. It threw `windows is not defined` instead
+            // of saying anything — a crash in the one place whose whole job is
+            // to explain a failure clearly.
             throw new Error('The AI keeps stopping part-way through the same stretch of this recording'
-              + (windows.length > 1 ? ` (the part starting at ${formatElapsed(windows[w].from)})` : '')
+              + (plannedWindows.length > 1 ? ` (the part starting at ${formatElapsed(cursor)})` : '')
               + ', so it has been stopped after ' + TRANSCRIPT_MAX_ATTEMPTS_PER_WINDOW + ' tries rather than charging for more. '
               + 'Everything written so far is saved in Drive next to the recording. '
               + 'Grading this session by listening to the audio directly is the way through — choose that on the form and submit again.');
@@ -7086,12 +7092,30 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
 
           if (!windowDone) {
             if (!written.canResume) {
-              throw new Error('The AI stopped part-way through writing out this recording and could not tell where it got to. '
-                + 'The part it did write is saved in Drive next to the recording. '
-                + 'Grading this session by listening to the audio directly is the way through — choose that on the form and submit again.');
+              // A pass that stopped without a usable resume point used to end the
+              // whole session on the spot, while a pass that stopped WITH one got
+              // three tries at the same window. That asymmetry was backwards: by
+              // this point the recording has been read and paid for several times
+              // over, and one bad pass is the cheapest thing there is to retry.
+              //
+              // Retrying re-writes the same stretch, and the duplication that
+              // costs is bounded by what "cannot resume" MEANS: the backend only
+              // says it when the furthest timestamp written is less than
+              // TRANSCRIPT_MIN_RESUME_ADVANCE_SECONDS past where the pass began,
+              // so the pass produced at most half a minute of transcript — and
+              // joinTranscriptChunks drops repeated opening lines anyway. The
+              // other shape is a pass with no timestamps at all, which is a
+              // preamble or a refusal rather than session content.
+              //
+              // fromSeconds is deliberately left where it is: there is no
+              // trustworthy point to move it to, and guessing one forward would
+              // punch a hole in the session that nothing downstream could detect.
+              console.warn('Transcription pass stopped with no usable resume point — retrying the same stretch from '
+                + formatElapsed(fromSeconds) + '.');
+            } else {
+              fromSeconds = written.resumeFromSeconds;
+              transcribeResumeFrom = fromSeconds;
             }
-            fromSeconds = written.resumeFromSeconds;
-            transcribeResumeFrom = fromSeconds;
             setPhase('transcribe');   // fresh slice of the estimate for the new pass
           }
         }
