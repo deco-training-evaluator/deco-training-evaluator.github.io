@@ -939,6 +939,14 @@
   .audio-plan strong { color: var(--text-primary); font-weight: 650; }
   .audio-plan .audio-plan-line { display: block; }
   .audio-plan .audio-plan-saving { color: color-mix(in srgb, var(--good) 82%, var(--text-primary)); font-weight: 600; }
+  /* Same color-mix treatment as .alert-bar-title and .notice-err, for the same
+     measured reason: full-strength --critical on --sunken lands around 4:1 at
+     this size, under AA. Pulling it 22% toward the text colour darkens it on
+     light and lightens it on dark, so one rule serves both schemes. The strong
+     override is needed because `.audio-plan strong` would otherwise repaint the
+     headline part of this line back to --text-primary. */
+  .audio-plan .audio-plan-blocked { color: color-mix(in srgb, var(--critical) 78%, var(--text-primary)); font-weight: 600; }
+  .audio-plan .audio-plan-blocked strong { color: inherit; }
   .radio-row { display: flex; gap: 16px; }
   .radio-row label { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; }
   .check-row {
@@ -4888,6 +4896,20 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     statusEl.className = 'err';
     return;
   }
+  // The hard ceiling (V17). Checked BEFORE the Drive upload, so a recording that
+  // cannot be graded doesn't cost a 200 MB round trip first, and before anything
+  // is written, so nothing half-finished lands in the Grading Log. Nothing typed
+  // into the form is cleared by returning here — swapping the file is all that's
+  // needed. A duration the browser couldn't read comes back as 0 and is let
+  // through deliberately: the backend checks it again, and refusing on a figure
+  // we don't have would block real sessions to catch a rare one.
+  if (audioFile && audioPlan && audioPlan.file === audioFile && audioPlan.seconds > MAX_GRADABLE_SECONDS) {
+    statusEl.innerHTML = escapeHtml(`This recording is ${formatDurationWords(audioPlan.seconds)} long, and the most the AI can take in one go is `
+      + `about ${formatDurationWords(MAX_GRADABLE_SECONDS)}. That is a hard limit on Google's side, not a setting here. `
+      + `Split the recording into two files and submit each as its own session — nothing else on this form has been lost.`);
+    statusEl.className = 'err';
+    return;
+  }
   if (rawGradeVal !== '') {
     const n = Number(rawGradeVal);
     if (!Number.isFinite(n) || n < 0 || n > gradeMaxForValidation) {
@@ -5116,6 +5138,10 @@ const TRANSCRIPT_PREFERRED_SECONDS = 30 * 60;
 // is what sets TRANSCRIPT_TOKENS_PER_SECOND's practical ceiling below.
 const PRICE_IN_PER_MTOK = 1.50;
 const PRICE_OUT_PER_MTOK = 9.00;
+// What a cached input token costs — a tenth of a fresh one. Only reachable
+// because Code.gs sends the audio BEFORE the prompt, so repeated windows share
+// a matching prefix. Never assumed in the headline figure.
+const PRICE_CACHED_IN_PER_MTOK = 0.15;
 const AUDIO_TOKENS_PER_SECOND = 32;
 const GRADING_PASS_COUNT = 3;
 const GRADING_OUTPUT_TOKENS = 3500;   // one grading pass's JSON, measured off live rows
@@ -5124,28 +5150,145 @@ const GRADING_OUTPUT_TOKENS = 3500;   // one grading pass's JSON, measured off l
 // speech at all, gives ~2.2 tokens of transcript per second of recording.
 // A guess, and the estimate is labelled as one.
 const TRANSCRIPT_TOKENS_PER_SECOND = 2.2;
-// Gemini 3.5 Flash writes at most 65,536 tokens in one answer. Past roughly
-// this much recording, the transcript needs more than one pass to finish — it
-// still works (the backend says where it stopped and the page asks for the
-// rest) but each extra pass re-reads the audio, so the saving shrinks.
-const TRANSCRIPT_ONE_PASS_SECONDS = 65536 / TRANSCRIPT_TOKENS_PER_SECOND;
-// How many times the page will ask for "the rest of it" before giving up.
-const MAX_TRANSCRIBE_CALLS = 6;
+
+/* ---- How long a recording can be, and how it gets broken up (V17) --------
+
+   THE HARD CEILING. Audio bills at 32 tokens a second and gemini-3.5-flash
+   reads 1,048,576 input tokens per request, so 32,518 seconds — about 9h01m —
+   is the absolute most that can reach the AI in one piece. This is Google's
+   limit, not a setting, and no amount of splitting the WORK gets around it,
+   because every call still sends the whole file (Gemini cannot bill part of an
+   audio file). Past this the recording has to be split into separate files and
+   submitted as separate sessions. Mirrors MAX_AUDIO_SECONDS_PER_REQUEST in
+   Code.gs — one more duplicated constant on the pile, and a stale copy here
+   makes the form refuse early or late; the backend still enforces the real one.
+
+   WHY WINDOWS. Two separate walls, and only one of them is about tokens:
+     - Output cap. 65,536 tokens per answer ÷ 2.2 per second of recording is
+       about 8h16m of transcript. An 8-hour recording is right on that line.
+     - Apps Script kills any execution at 6 minutes. Writing 63k tokens in one
+       go is several minutes of generation on top of reading a 1M-token file,
+       and that is the wall an 8-hour recording actually hits first.
+   Asking for a bounded window gives each call its own fresh 6-minute budget.
+
+   WHY NOT ALWAYS WINDOW. Every extra window re-reads the whole recording,
+   because of the no-partial-billing rule above. So windows are used only when
+   the recording needs them, and the count is the SMALLEST that keeps each
+   call's output to a safe size — never a fixed number.
+
+   Sized by OUTPUT TOKENS rather than by clock time, because output is what
+   both walls are actually made of. 30,000 tokens is ~2½ minutes of generation
+   at the rates Flash typically writes at, which leaves real room inside 6
+   minutes for reading the file first. It works out at ~3h47m of recording per
+   window, so: a 4h33m session is 2 windows, an 8-hour one is 3.
+
+   IF A WINDOW EVER OVERRUNS 6 MINUTES, THIS IS THE NUMBER TO TURN DOWN. How
+   fast the model writes is a guess until a real long session has run. */
+const MAX_GRADABLE_SECONDS = Math.floor((1048576 - 8000) / 32);
+const TRANSCRIPT_WINDOW_TARGET_TOKENS = 30000;
+// Never let a single window's output approach the 65,536 ceiling even if the
+// target above is edited upward carelessly.
+const TRANSCRIPT_WINDOW_MAX_TOKENS = 60000;
+
+// Two caps, because a stuck transcription is the one loop in this app that
+// spends real money per iteration: every pass re-reads the whole recording, so
+// on an 8-hour session each one is about $1.40 whether it achieves anything or
+// not. The per-window cap is the tight one and gives the useful error ("this
+// part of the recording keeps stopping short"); the total is the backstop.
+const TRANSCRIPT_MAX_ATTEMPTS_PER_WINDOW = 3;   // the first go plus two resumes
+const MAX_TRANSCRIBE_CALLS = 12;
+
+/* ---- Staying inside the 6-minute wall, by measuring rather than guessing ----
+
+   Apps Script kills any execution at 6 minutes — the same 6 minutes on a
+   Workspace account as on a personal one, so there is no plan involving a
+   bigger budget.
+
+   THERE IS NO WAY TO SALVAGE A PASS THAT RUNS OUT OF CLOCK, and it is worth
+   being clear why, because "just save what it has at 5:59" is the obvious idea.
+   Writing the transcript is ONE blocking UrlFetchApp call. Gemini does not
+   stream it back a line at a time; the whole answer arrives at the end or not
+   at all. At 5:59 the script is holding nothing, so there is nothing to write
+   out. A killed pass loses its own work and its own cost — never the session,
+   because every finished pass is saved to Drive before the next one starts.
+
+   So the only real defence is not to ask for more than fits. The window size
+   sets that, and how fast the model writes is a GUESS. Rather than betting all
+   the windows on one guess, each pass is timed and the REMAINING windows shrink
+   if a pass runs hot. One slow pass costs one retry, not a failed session. */
+// Past this, a pass is close enough to the wall to treat as a warning. 4m30s
+// of the 6-minute budget, so there is still 90 seconds of headroom when it
+// fires. Deliberately NOT tighter: every shrink means more passes and every
+// pass re-reads the whole recording, so over-reacting to a pass that was
+// comfortably fine is itself expensive.
+const TRANSCRIBE_SLOW_PASS_SECONDS = 270;
+// What the remaining span is multiplied by when that happens. 0.55 roughly
+// halves it, so two hot passes in a row bring it down to about a third.
+const TRANSCRIBE_SHRINK_FACTOR = 0.55;
+// A floor, so a pathologically slow model can't drive the window towards zero
+// and turn one session into fifty re-reads of the audio.
+const TRANSCRIBE_MIN_WINDOW_SECONDS = 20 * 60;
+
+// How many windows a recording of this length needs. Always at least 1, and
+// always few enough that no window can breach the output ceiling.
+function transcriptWindowCount(seconds) {
+  const total = Math.max(0, seconds || 0) * TRANSCRIPT_TOKENS_PER_SECOND;
+  if (!(total > 0)) return 1;
+  const byTarget = Math.ceil(total / TRANSCRIPT_WINDOW_TARGET_TOKENS);
+  const byCeiling = Math.ceil(total / TRANSCRIPT_WINDOW_MAX_TOKENS);
+  return Math.max(1, byTarget, byCeiling);
+}
+
+// The window boundaries themselves, split EVENLY rather than "3h47m, 3h47m,
+// then whatever's left" — an even split keeps every call about the same length,
+// so one short final window can't be the only one that fits while the others
+// all run the clock out.
+function transcriptWindows(seconds) {
+  const total = Math.max(0, seconds || 0);
+  const count = transcriptWindowCount(total);
+  if (!(total > 0)) return [{ from: 0, to: 0 }];   // unknown length: one open-ended pass
+  const step = total / count;
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    out.push({
+      from: Math.floor(i * step),
+      // The last window runs to the very end rather than to a rounded figure,
+      // so rounding can never leave a sliver of the session untranscribed.
+      to: i === count - 1 ? Math.ceil(total) : Math.floor((i + 1) * step)
+    });
+  }
+  return out;
+}
 
 function estimateGradingCost(seconds) {
   const audioTokens = Math.max(0, seconds || 0) * AUDIO_TOKENS_PER_SECOND;
   const transcriptTokens = Math.max(0, seconds || 0) * TRANSCRIPT_TOKENS_PER_SECOND;
   const gradingOut = GRADING_PASS_COUNT * GRADING_OUTPUT_TOKENS;
   const perM = (tokens, rate) => (tokens / 1e6) * rate;
+  // A long recording is transcribed in several windows, and EVERY window sends
+  // the whole file again — Gemini cannot bill part of an audio file. So the
+  // audio is paid for once per window, not once per session. Getting this wrong
+  // would understate an 8-hour session by about $2.80.
+  const windows = transcriptWindowCount(seconds);
 
   const audio = perM(audioTokens * GRADING_PASS_COUNT, PRICE_IN_PER_MTOK) + perM(gradingOut, PRICE_OUT_PER_MTOK);
-  const transcribing = perM(audioTokens, PRICE_IN_PER_MTOK) + perM(transcriptTokens, PRICE_OUT_PER_MTOK);
+  const transcribeOut = perM(transcriptTokens, PRICE_OUT_PER_MTOK);
+  const transcribing = perM(audioTokens * windows, PRICE_IN_PER_MTOK) + transcribeOut;
+  // The optimistic figure: the first window pays full price and every window
+  // after it hits the implicit cache at a tenth of the rate. That is what the
+  // audio-first request ordering in Code.gs makes possible — but it is Google's
+  // decision, not ours, so this is quoted as a "could be as low as", never as
+  // the headline number.
+  const transcribingCached = perM(audioTokens, PRICE_IN_PER_MTOK)
+    + perM(audioTokens * (windows - 1), PRICE_CACHED_IN_PER_MTOK) + transcribeOut;
   const gradingText = perM(transcriptTokens * GRADING_PASS_COUNT, PRICE_IN_PER_MTOK) + perM(gradingOut, PRICE_OUT_PER_MTOK);
 
   return {
     audio: audio,                        // listen, three times
-    transcript: transcribing + gradingText,  // write it out once, then read it three times
-    regrade: gradingText                 // every grading after the first
+    transcript: transcribing + gradingText,  // write it out, then read it three times
+    transcriptIfCached: transcribingCached + gradingText,
+    regrade: gradingText,                // every grading after the first
+    windows: windows
   };
 }
 
@@ -5223,17 +5366,51 @@ function describeChosenRecording() {
   const lines = [];
   lines.push(`<span class="audio-plan-line"><strong>${escapeHtml(lengthText)}</strong> recording${seconds > 0 ? ` · ${mb} MB` : ''}.</span>`);
 
+  // Past the hard ceiling nothing below is worth saying — this recording cannot
+  // be graded in one piece by any route, so say that and stop rather than
+  // quoting a price for something that will be refused at submit.
+  if (seconds > MAX_GRADABLE_SECONDS) {
+    lines.push(`<span class="audio-plan-line audio-plan-blocked"><strong>Too long to grade in one piece.</strong> `
+      + `The most the AI can take in one go is about ${escapeHtml(formatDurationWords(MAX_GRADABLE_SECONDS))} — `
+      + `that's a hard limit on Google's side, not a setting here.</span>`);
+    lines.push(`<span class="audio-plan-line">Split the recording into two files and submit each as its own session. `
+      + `Grading them separately is the only way through, and it also costs less than one long run would have.</span>`);
+    box.innerHTML = lines.join('');
+    box.classList.remove('hidden');
+    if (hint) hint.textContent = '';
+    return;
+  }
+
   if (medium === 'transcript') {
+    // Past about 6 hours the transcript route stops being the cheaper one: each
+    // window re-reads the whole recording, and enough windows eventually cost
+    // more than three straight listens. It is still the RIGHT route there —
+    // listening means three calls that each swallow the entire recording inside
+    // one 6-minute execution, which is the thing that cannot finish — but the
+    // copy has to stop claiming a saving it isn't making, or the number on
+    // screen contradicts the number beside it.
+    const dearerThanListening = seconds > 0 && cost.transcript > cost.audio;
     lines.push(`<span class="audio-plan-line">The AI will <strong>write out what was said first</strong>, then grade that. `
       + `Roughly <strong>${escapeHtml(formatMoney(cost.transcript))}</strong> this time`
-      + (seconds > 0 ? `, versus about ${escapeHtml(formatMoney(cost.audio))} if it listened straight through` : '')
+      + (seconds > 0 && !dearerThanListening ? `, versus about ${escapeHtml(formatMoney(cost.audio))} if it listened straight through` : '')
       + `.</span>`);
+    if (dearerThanListening) {
+      lines.push(`<span class="audio-plan-line">That is more than the ${escapeHtml(formatMoney(cost.audio))} listening straight through would cost, `
+        + `and it is still the right way round: listening to a recording this long means three calls that each have to swallow the whole thing `
+        + `inside Google's 6-minute limit, which is the part that doesn't finish. Writing it out breaks that into short pieces that do.</span>`);
+    }
     if (seconds > 0 && cost.regrade < cost.audio) {
       lines.push(`<span class="audio-plan-line audio-plan-saving">Grading this session again later costs about ${escapeHtml(formatMoney(cost.regrade))}, because the recording never has to be read a second time.</span>`);
     }
     lines.push(`<span class="audio-plan-line">Trade-off: a transcript can't carry tone, so pace and confidence are judged only from the notes the AI writes down while it listens.</span>`);
-    if (seconds > TRANSCRIPT_ONE_PASS_SECONDS) {
-      lines.push(`<span class="audio-plan-line">This one is long enough that writing it out will take more than one pass. That works, but each extra pass re-reads the audio, so the saving is smaller than the figure above.</span>`);
+    if (seconds > 0 && cost.windows > 1) {
+      lines.push(`<span class="audio-plan-line">A recording this long is written out in <strong>${cost.windows} passes</strong>`
+        + ` of about ${escapeHtml(formatDurationWords(seconds / cost.windows))} each, so no single step runs past Google's 6-minute limit.`
+        + ` Each pass has to re-read the recording, which is already counted in the figure above`
+        + (cost.transcriptIfCached < cost.transcript
+            ? `, and it could come in nearer ${escapeHtml(formatMoney(cost.transcriptIfCached))} if Google reuses what it already read`
+            : '')
+        + `.</span>`);
     }
   } else {
     lines.push(`<span class="audio-plan-line">The AI will <strong>listen to the recording directly</strong>. Roughly <strong>${escapeHtml(formatMoney(cost.audio))}</strong>.</span>`);
@@ -5323,7 +5500,12 @@ function estimatedPhaseSeconds(audioBytes, medium, audioSeconds) {
       // a few hundred tokens a second. Capped at 5½ minutes because past that
       // the call is going to hit Google's wall anyway and the estimate stops
       // being the useful part.
-      transcribe: Math.round(Math.min(330, 45 + seconds * 0.012)),
+      //
+      // PER WINDOW, not per session (V17). A long recording is written out in
+      // several bounded passes, and this figure is what the progress bar shows
+      // for the pass currently running — quoting the whole session's time
+      // against one pass would have every pass look wildly ahead of schedule.
+      transcribe: Math.round(Math.min(330, 45 + (seconds / transcriptWindowCount(seconds)) * 0.012)),
       // Three passes over ~40k tokens of text, fired together. Seconds, not
       // minutes — this is the phase the whole change exists to make cheap.
       grade: 45
@@ -5397,6 +5579,16 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
   // Only used by the progress label, to say what it's picking up from rather
   // than looking like it restarted.
   let transcribeResumeFrom = 0;
+  // V17. A long recording is written out in several bounded windows, and each
+  // one owns its own sub-slice of the transcribe phase — otherwise finishing
+  // window 1 of 3 would send the bar back to the start of that phase, which is
+  // exactly the "looks like a reset" this bar is built to avoid.
+  let transcribeWindowIndex = 0;
+  let transcribeWindowTotal = activeMedium === 'transcript' ? transcriptWindowCount(audioSeconds) : 1;
+  // Set once a pass has come back close enough to Google's 6-minute limit that
+  // the remaining passes were shortened. Worth saying on screen: the pass count
+  // going up mid-run otherwise looks like something going wrong.
+  let transcribeRanHot = false;
 
   // V15: grading is two round trips now, because Apps Script's 6-minute limit
   // is per CALL. Phase 1 gets the recording somewhere Gemini can read it,
@@ -5404,6 +5596,9 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
   // which one is running or a 4-minute upload looks like a hung grade.
   let phase = 'upload';
   let phaseStartedAt = Date.now();
+  // The high-water mark behind the ratchet in renderProgress — see the note
+  // there for why a resumed window would otherwise walk the bar backwards.
+  let progressFloor = 0;
   function setPhase(next) {
     phase = next;
     phaseStartedAt = Date.now();
@@ -5451,13 +5646,25 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
       pct = startsAt.processing + Math.min(slice.processing, (inPhase / 60) * slice.processing);
       label = `Step 1 of ${steps} — the AI is unpacking the recording. This can take a minute on a long session.`;
     } else if (phase === 'transcribe') {
-      pct = startsAt.transcribe + Math.min(slice.transcribe, (inPhase / estimates.transcribe) * slice.transcribe);
+      // Each window gets an equal share of the transcribe slice, and the bar
+      // moves inside the current window's share only — so it climbs steadily
+      // across all of them instead of jumping back at every handover.
+      const perWindow = slice.transcribe / Math.max(1, transcribeWindowTotal);
+      pct = startsAt.transcribe
+        + perWindow * Math.min(transcribeWindowIndex, transcribeWindowTotal)
+        + Math.min(perWindow, (inPhase / estimates.transcribe) * perWindow);
+      const ofWindows = transcribeWindowTotal > 1
+        ? ` Pass ${Math.min(transcribeWindowIndex + 1, transcribeWindowTotal)} of ${transcribeWindowTotal}.`
+        : '';
       const resumed = transcribeResumeFrom > 0
-        ? ` Picking up from ${formatElapsed(transcribeResumeFrom)} — a recording this long takes more than one pass.`
+        ? ` Picking up from ${formatElapsed(transcribeResumeFrom)}.`
+        : '';
+      const ranHot = transcribeRanHot
+        ? ' A pass ran close to Google\'s 6-minute limit, so the rest are being done in shorter pieces.'
         : '';
       label = (inPhase <= estimates.transcribe
-        ? `Step 2 of 3 — writing out what was said, with timestamps. About ${formatElapsed(estimates.transcribe)} for a recording this length (an estimate, not a live progress feed).`
-        : `Step 2 of 3 — still writing it out. This one is past the expected ${formatElapsed(estimates.transcribe)}. Hang tight.`) + resumed;
+        ? `Step 2 of 3 — writing out what was said, with timestamps.${ofWindows} About ${formatElapsed(estimates.transcribe)} for this pass (an estimate, not a live progress feed).`
+        : `Step 2 of 3 — still writing it out.${ofWindows} This pass is past the expected ${formatElapsed(estimates.transcribe)}. Hang tight.`) + resumed + ranHot;
     } else {
       pct = startsAt.grade + Math.min(slice.grade, (inPhase / estimates.grade) * slice.grade);
       label = activeMedium === 'transcript'
@@ -5471,6 +5678,15 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
     // Past every estimate, creep instead of stalling, and never claim 100%
     // until the real result is actually in hand.
     pct = Math.min(97, pct);
+    // A RATCHET, and it earns its place (V17). Every phase change restarts the
+    // in-phase clock, which is right when the phase genuinely moved on — but a
+    // window that truncates and resumes calls setPhase WITHOUT advancing the
+    // window index, so the bar would drop back to the start of that window's
+    // share. Going backwards reads as "it failed and started over" on precisely
+    // the recordings where somebody is already watching a long bar nervously.
+    // Clamping here rather than at each call site covers every future one too.
+    pct = Math.max(pct, progressFloor);
+    progressFloor = pct;
 
     statusEl.innerHTML =
       `<div class="ai-progress-text">${escapeHtml(label)}</div>` +
@@ -5584,56 +5800,144 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
     let transcriptUrl = '';
     if (activeMedium === 'transcript' && !backendIsPreV15) {
       setPhase('transcribe');
-      let fromSeconds = 0;
-      let complete = false;
+      // V17. The windows are worked out here, from the duration the browser read
+      // off the file, because only this side knows how long the recording is —
+      // the backend transcribes exactly the window it is handed. A recording
+      // short enough for one pass gets a single open-ended window, which is
+      // byte-for-byte the V16 request and keeps that path undisturbed.
+      const knownLength = audioSeconds > 0;
+      const plannedWindows = transcriptWindows(audioSeconds);
+      transcribeWindowTotal = plannedWindows.length;
+      // How much recording one window covers. This is the ONLY thing standing
+      // between a long session and the 6-minute wall, and it starts as a guess
+      // about how fast the model writes — so it is re-checked after every pass
+      // and shrunk if one runs hot. See the note by TRANSCRIBE_SLOW_PASS_SECONDS
+      // for why a pass that runs out of clock cannot simply be saved instead.
+      let windowSpan = knownLength ? audioSeconds / plannedWindows.length : 0;
+      let cursor = 0;            // seconds of the recording already written out
+      let windowsDone = 0;
+      let callsUsed = 0;
+      let droppedToAudio = false;
 
-      for (let attempt = 1; attempt <= MAX_TRANSCRIBE_CALLS && !complete; attempt++) {
-        const written = await callGrader({
-          action: 'transcribe',
-          audioFileId,
-          geminiFileUri,
-          audioMimeType,
-          transcriptFileId,     // blank on the first pass; appends on the rest
-          fromSeconds,
-          traineeName,
-          regionalManagerName   // so the transcript can label who is who
-        });
+      while (!droppedToAudio) {
+        // The final window is always sent open-ended (0 = "to the very end of
+        // the recording") rather than bounded by the duration this page read. A
+        // container that reports its length slightly short would otherwise stop
+        // the transcript a few seconds early, and nothing downstream could
+        // detect it. Running long costs nothing; stopping short loses evidence.
+        // An unreadable duration takes this path on the first pass, which is the
+        // single open-ended V16 request, unchanged.
+        const isFinalWindow = !knownLength || (cursor + windowSpan) >= audioSeconds - 1;
+        const toSeconds = isFinalWindow ? 0 : Math.floor(cursor + windowSpan);
+        let fromSeconds = cursor;
+        transcribeWindowIndex = windowsDone;
+        transcribeResumeFrom = 0;
+        let windowDone = false;
+        let attemptsThisWindow = 0;
 
-        // A V15 backend has never heard of this action, reads it as a grade
-        // request with no sessionType, and says so — the same signature the
-        // pre-V15 check above uses, for the same reason. Fall back to listening
-        // rather than failing: the two halves ship by different routes and a
-        // page newer than the script is a window that WILL happen.
-        if (!written.ok && /sessionType must be/.test(written.error || '')) {
-          console.warn('Grading backend is older than V16 — no transcription step. Falling back to grading the audio directly.');
-          activeMedium = 'audio';
-          estimates = estimatedPhaseSeconds(audioBytes, 'audio', audioSeconds);
-          break;
-        }
-        if (!written.ok) throw new Error(written.error || 'Writing out the recording failed.');
-
-        // Held onto before anything can throw: the transcript is already saved
-        // in Drive at this point and has already been paid for, so its id must
-        // survive a later failure rather than being lost with the run.
-        transcriptFileId = written.transcriptFileId || transcriptFileId;
-        transcriptUrl = written.transcriptUrl || transcriptUrl;
-        complete = !!written.complete;
-
-        if (!complete) {
-          if (!written.canResume) {
-            throw new Error('The AI stopped part-way through writing out this recording and could not tell where it got to. '
-              + 'The part it did write is saved in Drive next to the recording. '
+        while (!windowDone) {
+          // Both caps are checked before the call, never after: the point is to
+          // not spend the money, and by the time a pass has answered it has
+          // already read the whole recording and been charged for it.
+          if (attemptsThisWindow >= TRANSCRIPT_MAX_ATTEMPTS_PER_WINDOW) {
+            throw new Error('The AI keeps stopping part-way through the same stretch of this recording'
+              + (windows.length > 1 ? ` (the part starting at ${formatElapsed(windows[w].from)})` : '')
+              + ', so it has been stopped after ' + TRANSCRIPT_MAX_ATTEMPTS_PER_WINDOW + ' tries rather than charging for more. '
+              + 'Everything written so far is saved in Drive next to the recording. '
               + 'Grading this session by listening to the audio directly is the way through — choose that on the form and submit again.');
           }
-          fromSeconds = written.resumeFromSeconds;
-          transcribeResumeFrom = fromSeconds;
-          setPhase('transcribe');   // fresh slice of the estimate for the new pass
-        }
-      }
+          if (callsUsed >= MAX_TRANSCRIBE_CALLS) {
+            throw new Error('This recording has taken ' + MAX_TRANSCRIBE_CALLS + ' passes to write out and still is not finished. '
+              + 'Everything written so far is saved in Drive next to the recording. '
+              + 'A recording this long is better split into two files and graded as two sessions.');
+          }
+          callsUsed++;
+          attemptsThisWindow++;
 
-      if (activeMedium === 'transcript' && !complete) {
-        throw new Error('This recording needed more than ' + MAX_TRANSCRIBE_CALLS + ' passes to write out and still is not finished. '
-          + 'What was written is saved in Drive next to the recording. A recording this long is better split into parts and graded separately.');
+          const written = await callGrader({
+            action: 'transcribe',
+            audioFileId,
+            geminiFileUri,
+            audioMimeType,
+            transcriptFileId,     // blank on the very first pass; appends on the rest
+            fromSeconds,
+            toSeconds,            // V17; a V16 backend ignores it and runs open-ended
+            totalSeconds: audioSeconds,   // lets the backend refuse a recording past the hard ceiling
+            traineeName,
+            regionalManagerName   // so the transcript can label who is who
+          });
+
+          // A V15 backend has never heard of this action, reads it as a grade
+          // request with no sessionType, and says so — the same signature the
+          // pre-V15 check above uses, for the same reason. Fall back to listening
+          // rather than failing: the two halves ship by different routes and a
+          // page newer than the script is a window that WILL happen.
+          if (!written.ok && /sessionType must be/.test(written.error || '')) {
+            console.warn('Grading backend is older than V16 — no transcription step. Falling back to grading the audio directly.');
+            activeMedium = 'audio';
+            estimates = estimatedPhaseSeconds(audioBytes, 'audio', audioSeconds);
+            droppedToAudio = true;
+            break;
+          }
+          if (!written.ok) throw new Error(written.error || 'Writing out the recording failed.');
+
+          // Held onto before anything can throw: the transcript is already saved
+          // in Drive at this point and has already been paid for, so its id must
+          // survive a later failure rather than being lost with the run.
+          transcriptFileId = written.transcriptFileId || transcriptFileId;
+          transcriptUrl = written.transcriptUrl || transcriptUrl;
+
+          // How close that pass ran to the 6-minute wall. If it ran hot, every
+          // REMAINING window shrinks — the whole point of measuring rather than
+          // betting the session on one guess about how fast the model writes.
+          // Only meaningful when the length is known; with no duration there is
+          // one open-ended pass and nothing left to resize.
+          const passSeconds = Number(written.elapsedMs || 0) / 1000;
+          if (knownLength && passSeconds > TRANSCRIBE_SLOW_PASS_SECONDS) {
+            const shrunk = Math.max(TRANSCRIBE_MIN_WINDOW_SECONDS, Math.floor(windowSpan * TRANSCRIBE_SHRINK_FACTOR));
+            if (shrunk < windowSpan) {
+              console.warn(`Transcription pass took ${Math.round(passSeconds)}s, close to Google's 6-minute limit — `
+                + `shortening the remaining passes from ${Math.round(windowSpan / 60)}min to ${Math.round(shrunk / 60)}min of recording each.`);
+              windowSpan = shrunk;
+              transcribeRanHot = true;
+            }
+          }
+
+          // "complete" from the backend means it finished THIS WINDOW, not the
+          // whole recording. Deciding the session is done is this loop's job,
+          // because only this side knows how many windows there are.
+          windowDone = !!written.complete;
+
+          if (!windowDone) {
+            if (!written.canResume) {
+              throw new Error('The AI stopped part-way through writing out this recording and could not tell where it got to. '
+                + 'The part it did write is saved in Drive next to the recording. '
+                + 'Grading this session by listening to the audio directly is the way through — choose that on the form and submit again.');
+            }
+            fromSeconds = written.resumeFromSeconds;
+            transcribeResumeFrom = fromSeconds;
+            setPhase('transcribe');   // fresh slice of the estimate for the new pass
+          }
+        }
+
+        if (droppedToAudio) break;
+
+        // Counts the finished window so the bar advances past its share.
+        windowsDone++;
+        transcribeWindowIndex = windowsDone;
+        cursor = isFinalWindow ? audioSeconds : toSeconds;
+
+        // With no duration there was nothing to divide up: that one open-ended
+        // pass either reached the end or the resume loop above dealt with it.
+        if (!knownLength) break;
+        if (cursor >= audioSeconds) break;
+
+        // Re-estimated rather than fixed, because windowSpan may have shrunk
+        // since the plan was drawn. The bar's ratchet means a growing total
+        // makes it pause rather than jump backwards — honest, since finding out
+        // there is more work left is exactly what has happened.
+        transcribeWindowTotal = windowsDone + Math.max(1, Math.ceil((audioSeconds - cursor) / windowSpan));
+        setPhase('transcribe');   // fresh slice of the estimate for the next pass
       }
     }
 
