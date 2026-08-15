@@ -1958,10 +1958,35 @@
                      background: color-mix(in srgb, var(--warning) 18%, transparent); }
   .cmp-delta.far   { color: color-mix(in srgb, var(--critical) 78%, var(--text-primary));
                      background: color-mix(in srgb, var(--critical) 16%, transparent); }
-  .cmp-human-input { width: 68px; padding: 5px 7px; font-size: 14px; font-weight: 700;
+  /* The score you type sits in the SAME cell as the AI score it's being
+     measured against, one per recording — see HUMAN_SCORES_IDX for why a
+     single shared column was wrong. */
+  .cmp-human-field { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+  .cmp-human-tag { font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase;
+                   font-weight: 700; color: var(--text-secondary); }
+  .cmp-human-input { width: 56px; padding: 5px 7px; font-size: 14px; font-weight: 700;
                      font-variant-numeric: tabular-nums; border: 1px solid var(--border-strong);
-                     border-radius: 7px; background: var(--sunken); color: var(--text-primary); }
+                     border-radius: 7px; background: var(--sunken); color: var(--text-primary);
+                     /* Jordan, 2026-08-14: "can take these arrows out". The spinners are
+                        no use for a 0-10 rubric score you already know, they steal width
+                        from a column that has none to spare, and a stray scroll over a
+                        focused number input silently changes the score. Kept as
+                        type="number" for the numeric keypad and the min/max. */
+                     -moz-appearance: textfield; appearance: textfield; }
+  .cmp-human-input::-webkit-outer-spin-button,
+  .cmp-human-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .cmp-human-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* An edited-but-unsaved box is marked, because these now go to a shared Sheet
+     rather than this browser: "did that save?" must be answerable by looking. */
+  .cmp-human-input.is-dirty { border-color: color-mix(in srgb, var(--warning) 60%, transparent);
+                              background: color-mix(in srgb, var(--warning) 12%, var(--sunken)); }
+  .cmp-save-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+  .cmp-save-status { font-size: 12px; font-weight: 600; }
+  .cmp-save-status.ok    { color: color-mix(in srgb, var(--good) 82%, var(--text-primary)); }
+  .cmp-save-status.err   { color: color-mix(in srgb, var(--critical) 78%, var(--text-primary)); }
+  .cmp-save-status.dirty { color: color-mix(in srgb, var(--warning) 78%, var(--text-primary)); }
+  .cmp-human-total { display: block; margin-top: 7px; font-size: 13px; font-weight: 700;
+                     color: var(--text-secondary); }
   .cmp-table tr.cmp-total-row td { border-top: 2px solid var(--border-strong); background: var(--sunken); font-weight: 700; }
   .cmp-table tr.cmp-total-row .cmp-score { font-size: 17px; }
   .cmp-verdict-row td { background: var(--sunken); }
@@ -2371,9 +2396,12 @@
         they're left off — everyone else on the Roster is here, including any role added later.
         <br><strong>Changing a status:</strong> click any badge to change it — it writes straight back to the
         Roster sheet, and asks you to click again to confirm.
-        <br><strong>These are tracked, not graded.</strong> Ticking someone off here is a person's decision,
-        exactly like the certifications on the Training/TOSD tab. A passing AI grade on a Conversion Call does
-        <em>not</em> tick anything here — the recruiting rubrics are still being calibrated.
+        <br><strong>Conversion Calls certify from a grade; the other four are ticked by hand.</strong>
+        Submitting a <em>manual</em> grade of 48/80 or better with every section at 6 or higher ticks the
+        Conversion Call column here for you. The other four rubrics aren't loaded yet, so there's no score to
+        certify off — those badges are a person's decision and nothing else.
+        <br><strong>A passing AI grade never ticks anything here</strong>, on any of the five. Only a grade a
+        human signed off moves these columns.
         <br><strong>Adding someone</strong> is on the Training/TOSD tab, which lists the whole Roster.
       </div>
       <p id="recruiting-stats-scope" class="stat-scope"></p>
@@ -2455,6 +2483,15 @@
           </div>
         </div>
         <div id="compare-wrap"><div class="empty-state">Sign in, then pick a person to compare.</div></div>
+        <!-- Deliberately OUTSIDE #compare-wrap, which renderCompare replaces
+             wholesale. Leaving a score box and clicking Save fires that box's
+             change event first; if that rebuilt this button, mousedown and
+             mouseup would land on different elements and the click would never
+             fire. See updateCompareSaveBar. -->
+        <div id="cmp-save-bar" class="cmp-save-bar hidden">
+          <button id="cmp-save-btn" class="btn" disabled>Save to the Grading Log</button>
+          <span id="cmp-save-status" class="cmp-save-status"></span>
+        </div>
       </div>
     </section>
 
@@ -2604,11 +2641,15 @@ const SESSION_TABS = [
     // other three, which still have no rubric loaded.
     //
     // This is the first live type that grades a RECRUITING call rather than a
-    // field-training session, and two things fall out of that by construction
-    // rather than by special case: it has no entry in SESSION_CERT_COLUMN (a
-    // conversion-call pass is not a roster sign-off) and none in
-    // SESSION_PREREQUISITES (the Day 1/Day 2 training steps have no bearing on
-    // whether somebody can make a recruiting call).
+    // field-training session, which is why it has no entry in
+    // SESSION_PREREQUISITES — the Day 1/Day 2 training steps have no bearing on
+    // whether somebody can make a recruiting call, so that gate is inert here by
+    // construction rather than by special case.
+    //
+    // It DOES have a certification column as of 2026-08-14 (Jordan's ask — see
+    // SESSION_CERT_COLUMN), so a passing manual grade signs somebody off for
+    // Conversion Calls on the Recruiting Dashboard. The AI's own verdict still
+    // reads Pass / Fail rather than Certified, and still writes nothing.
     key: 'conversion',
     label: 'Conversion Call',
     sessionType: 'Conversion Call',
@@ -3354,6 +3395,9 @@ document.getElementById('tab-followups-btn').addEventListener('click', () => sho
 document.getElementById('tab-compare-btn').addEventListener('click', () => showTab('compare'));
 document.getElementById('cmp-person').addEventListener('change', renderCompare);
 document.getElementById('cmp-type').addEventListener('change', renderCompare);
+// Wired ONCE, here, because this button is never re-rendered — see the comment
+// on the markup and on updateCompareSaveBar.
+document.getElementById('cmp-save-btn').addEventListener('click', saveCompareHumanGrades);
 // Re-reads the Grading Log rather than clearing submissionsCache — the Dashboard
 // badges read that same cache, and blanking it mid-flight would empty them.
 document.getElementById('cmp-refresh-btn').addEventListener('click', async () => {
@@ -3654,14 +3698,15 @@ const ROSTER_SHORT_LABELS = {
      parent reference check are two different session types with two different
      rubrics — the same reason they need two sessionType strings in Code.gs,
      even though they share one tab.
-   - **These are HUMAN-ticked only, and are deliberately NOT in
-     SESSION_CERT_COLUMN.** That map is what lets a passing manual grade write a
-     certification onto the Roster, and what raises the un-certify offer after a
-     delete. Four of these five session types have no rubric loaded at all, and
-     the fifth (Conversion Call) has been graded against one real call in its
-     life — so certifying off a score is authority this side of the app hasn't
-     earned yet. Wiring Conversion Call in is a small change if it's ever
-     wanted; it should be a decision, not a side effect of adding a column.
+   - **Four of these five are HUMAN-ticked only; Conversion Call is wired up.**
+     SESSION_CERT_COLUMN is what lets a passing manual grade write a
+     certification onto the Roster and what raises the un-certify offer after a
+     delete. Conversion Calls joined it on 2026-08-14 (Jordan: "if they got a
+     passing grade they are now certified, only for manual entries") — the
+     decision this note said should be made deliberately rather than fall out of
+     adding a column. The other four stay out of it because they have no rubric
+     loaded at all: there is no score there to certify off, so a badge on those
+     columns is a manager's tick and nothing else.
    - **Who appears is decided by EXCLUDING field managers, not by listing the
      senior roles.** An include-list would silently drop a role nobody has
      invented yet — a new senior title would vanish from this board with nothing
@@ -5168,11 +5213,37 @@ const MANUAL_SECTIONS_HEADER = 'All Sections 6+';
 // past T/U/V/W so it collides with nothing this page owns. See the V16 note in
 // Code.gs.
 const TRANSCRIPT_LINK_IDX = 23;                    // X
+
+/* The human grader's own per-section scores for ONE recording, as JSON, at
+   column Y. Written from the Compare tab (2026-08-14) — Jordan asked for a
+   save on the typed-in scores, having chosen the Grading Log over this
+   browser's storage, so a colleague opening Compare sees the same reference
+   grade and clearing site data no longer wipes the Phase 2 record.
+
+   Two decisions worth not re-litigating:
+
+   ONE GRADE PER RECORDING, NOT PER PERSON. localStorage keyed these by person
+   + session type, so a single column of boxes covered every run. That only
+   held because the runs so far were the same call graded four ways: the
+   moment somebody has two DIFFERENT conversion calls, one shared human grade
+   silently claims to describe both. A Sheet row is one session, which is the
+   honest unit, so the boxes moved into each run's own column.
+
+   ON THE **AI** ROW, unlike the sections tick at W. A session is up to two
+   rows, and the manual one need not exist at all (audio-only submissions have
+   no manual grade) — but Compare only ever shows sessions that HAVE an AI row,
+   since that's where the score it's comparing against lives. So the AI row is
+   the one guaranteed to be there. Same reasoning that put the follow-up state
+   on it. */
+const HUMAN_SCORES_IDX = 24;                       // Y
+const HUMAN_SCORES_HEADER = 'Human Section Scores';
+
 // Every range that reads or clears a Grading Log row has to reach this far, or
 // a delete leaves a stray Yes behind and a read comes back without the tick.
-// Moved W -> X in V16: stopping at W would strand a transcript link pointing at
-// a session that no longer exists.
-const GRADING_LOG_LAST_COLUMN = 'X';
+// Moved W -> X in V16 (a stranded transcript link), and X -> Y in 2026-08-14
+// for the human grades above — stopping short would leave a deleted session's
+// calibration grade behind, pointing at a recording that no longer exists.
+const GRADING_LOG_LAST_COLUMN = 'Y';
 
 // Is this ONE recording a pass? Both halves of the Smartsheet formula, or
 // nothing. Deliberately not named *Certifies any more: on a session type that
@@ -5187,6 +5258,24 @@ function manualGradePasses(sessionType, rawGrade, everySectionPassed) {
   if (rawGrade === '') return false;
   const total = Number(rawGrade);
   return Number.isFinite(total) && total >= threshold;
+}
+
+/* Is there actually a column on the Roster to record this certification in?
+
+   A session type can be in SESSION_CERT_COLUMN and still have nowhere to write:
+   the five recruiting columns are added to the Roster on request (see
+   addRecruitingColumnsToRoster), so a passing Conversion Call can easily arrive
+   before the header exists. certifyOnRoster already refuses in that case and
+   says so, but the preview would have promised a certification the app can't
+   deliver, which is exactly the kind of thing this form exists to catch early.
+
+   An unread Roster is deliberately NOT reported as missing. "We haven't looked
+   yet" and "it isn't there" are different facts, and claiming the second while
+   the read is in flight would send somebody off to add a column they already
+   have — the same distinction passingManualGrades makes with null vs 0. */
+function certColumnMissing(sessionType) {
+  const column = SESSION_CERT_COLUMN[sessionType];
+  return !!column && rosterHeaders.length > 0 && !rosterHeaders.includes(column);
 }
 
 // 0-based column index to a Sheets column letter. The certification column is
@@ -5206,16 +5295,17 @@ function columnLetter(index) {
 async function certifyOnRoster(name, sessionType) {
   const column = SESSION_CERT_COLUMN[sessionType];
   const person = rosterPerson(name);
-  if (!column) return `${sessionType} has no certification column on the Roster, so the Dashboard is unchanged.`;
-  if (!person) return `Dashboard not updated — "${name}" isn't on the Roster.`;
+  const board = certBoardLabel(sessionType);
+  if (!column) return `${sessionType} has no certification column on the Roster, so nothing changed.`;
+  if (!person) return `${board} not updated — "${name}" isn't on the Roster.`;
   if (isAlreadyCertified(name, sessionType)) return `${name} was already certified for ${sessionType}.`;
   const colIndex = rosterHeaders.indexOf(column);
-  if (colIndex === -1) return `Dashboard not updated — the Roster has no "${column}" column.`;
+  if (colIndex === -1) return `${board} not updated — the Roster has no "${column}" column.`;
   const cell = `${columnLetter(colIndex)}${person[ROSTER_ROW_NUMBER]}`;
   // "Yes" is exactly what certBadge() reads to paint the green badge, and what
   // anyone updating the Roster by hand types.
   await sheetsBatchUpdate(ROSTER_SHEET_ID, [{ range: cell, values: [['Yes']] }]);
-  return `${name} is now certified for ${sessionType} on the Dashboard.`;
+  return `${name} is now certified for ${sessionType} on the ${board} tab.`;
 }
 
 // The same write in reverse, for when the grade that earned a certification is
@@ -5318,12 +5408,22 @@ function renderCertPreview() {
   // passingManualGrades. The branches below have to handle that, not paper over
   // it with a zero.
   const onFile = required === 1 ? null : passingManualGrades(name, sessionType);
+  // Which board the badge is on — there are two now, and a Conversion Call
+  // certification is on the Recruiting one. See certBoardLabel.
+  const board = escapeHtml(certBoardLabel(sessionType));
   let html;
   let willCertify = false;
   if (total < threshold) {
-    html = `<strong>${total}/${max} is under the ${threshold} needed to certify</strong> — the Dashboard won't change.`;
+    html = `<strong>${total}/${max} is under the ${threshold} needed to certify</strong> — the ${board} tab won't change.`;
+  } else if (certColumnMissing(sessionType)) {
+    // Nowhere to record it. Says which column and where the button is, rather
+    // than promising a certification the submit would then have to walk back.
+    html = `${total}/${max} clears the ${threshold} bar, but the Roster has no ` +
+      `<strong>"${escapeHtml(SESSION_CERT_COLUMN[sessionType])}"</strong> column yet, ` +
+      `so there's nowhere to record it. The grade still saves — add the column from the ` +
+      `Recruiting Dashboard tab first if you want this to certify.`;
   } else if (isAlreadyCertified(name, sessionType)) {
-    html = `${who} is already certified for ${sessionType} — the Dashboard won't change.`;
+    html = `${who} is already certified for ${sessionType} — the ${board} tab won't change.`;
   } else if (!ticked) {
     // On a multi-recording session type the tick doesn't certify on its own, so
     // it mustn't be described as though it does — it's what makes this
@@ -5334,22 +5434,22 @@ function renderCertPreview() {
         : `Counting it as a pass also needs every section at 6 or better — <strong>tick the box above</strong>.`);
   } else if (required === 1) {
     willCertify = true;
-    html = `${checkIcon()} <strong>Submitting will mark ${who} as certified for ${sessionType}</strong> on the Dashboard.`;
+    html = `${checkIcon()} <strong>Submitting will mark ${who} as certified for ${sessionType}</strong> on the ${board} tab.`;
   } else if (onFile === null) {
     /* No name picked yet, or the Grading Log hasn't been read. Say what the
        rule is without claiming a position in it — a preview that guesses "their
        1st of 3" at somebody sitting on their third pass is worse than one that
        doesn't count. */
     html = `${total}/${max} is a pass. ${sessionType} certification takes ` +
-      `<strong>${plural(required, 'passing recording')}</strong> — the Dashboard updates once the ${ordinal(required)} is in.`;
+      `<strong>${plural(required, 'passing recording')}</strong> — the ${board} tab updates once the ${ordinal(required)} is in.`;
   } else if (onFile + 1 >= required) {
     willCertify = true;
-    html = `${checkIcon()} <strong>Submitting will mark ${who} as certified for ${sessionType}</strong> on the Dashboard — ` +
+    html = `${checkIcon()} <strong>Submitting will mark ${who} as certified for ${sessionType}</strong> on the ${board} tab — ` +
       `it's their ${ordinal(onFile + 1)} passing recording.`;
   } else {
     const left = required - onFile - 1;
     html = `${total}/${max} is a pass — ${who}'s <strong>${ordinal(onFile + 1)} of ${required}</strong>. ` +
-      `The Dashboard won't change yet; ` +
+      `The ${board} tab won't change yet; ` +
       (left === 1 ? 'one more passing recording certifies them.' : `${left} more passing recordings certify them.`);
   }
   el.innerHTML = html;
@@ -5686,14 +5786,15 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
       // different Sheet, so it's kept out of the try/catch above: if it fails
       // the submission still stands, and the message says exactly what to go
       // tick by hand rather than implying the whole thing failed.
+      const certBoard = certBoardLabel(sessionType);
       const doCertify = async () => {
-        statusEl.textContent = 'Updating the Dashboard…';
+        statusEl.textContent = `Updating the ${certBoard} tab…`;
         try {
           certNote = ' ' + await certifyOnRoster(traineeName, sessionType);
           await loadRoster();
         } catch (certErr) {
           console.error(certErr);
-          certNote = ` The grade saved, but the Dashboard couldn't be updated (${certErr.message}) — ` +
+          certNote = ` The grade saved, but the ${certBoard} tab couldn't be updated (${certErr.message}) — ` +
             `mark ${traineeName} certified on the Roster by hand.`;
         }
       };
@@ -5703,7 +5804,7 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
       } else if (isAlreadyCertified(traineeName, sessionType)) {
         // Nothing to count and nothing to write. Said out loud anyway, because
         // silence after a passing grade reads as something having gone wrong.
-        certNote = ` ${traineeName} is already certified for ${sessionType}, so the Dashboard is unchanged.`;
+        certNote = ` ${traineeName} is already certified for ${sessionType}, so the ${certBoard} tab is unchanged.`;
       } else {
         /* The count has to come from a FRESH read, not from submissionsCache.
            The row for this very grade was appended seconds ago and isn't in the
@@ -5728,7 +5829,7 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
           // to has already said so, in both the with-audio and no-audio wording.
           certNote = ` The Grading Log couldn't be re-read` +
             (countErr ? ` (${countErr.message})` : '') +
-            `, so the Dashboard was left alone. ${sessionType} certification needs ` +
+            `, so the ${certBoard} tab was left alone. ${sessionType} certification needs ` +
             `${plural(required, 'passing recording')} — press Refresh and check where ${traineeName} stands.`;
         } else if (passCount >= required) {
           await doCertify();
@@ -7210,11 +7311,13 @@ function scoreBadge(score, evidenceBasis) {
 }
 
 /* The word on the badge follows the session type, because "Certified" is a claim
-   about the Roster and it is only true for the two types that have a
-   certification column. A conversion call is a recruiting call: passing it signs
-   nobody off on anything, and a badge reading "Certified" over a recruiting
-   score would invite exactly the reading this app spends so much effort
-   avoiding. PASS / FAIL is also the source rubric's own language. */
+   about the Roster and this badge is the AI's verdict, which never writes there.
+   PASS / FAIL is also the source rubric's own language for a conversion call.
+
+   Still correct now that a Conversion Call CAN certify (SESSION_CERT_COLUMN,
+   2026-08-14), and arguably more important: only a manual grade a human signed
+   off moves that column, so a card reading "Certified" over an AI score would
+   claim precisely the authority this app withholds until Phase 5. */
 const VERDICT_WORDS = {
   'Conversion Call': { yes: 'Pass', no: 'Fail', noun: 'A pass', failPhrase: 'a fail' }
 };
@@ -8057,17 +8160,17 @@ function showUncertifyOffer(name, sessionType, announce = true, onFile = 0) {
   // it needs to know it's about a different screen before they read a word more.
   const title = document.createElement('div');
   title.className = 'alert-bar-title';
-  title.textContent = 'Action needed — the Dashboard still says certified';
+  title.textContent = `Action needed — the ${certBoardLabel(sessionType)} tab still says certified`;
 
   const text = document.createElement('div');
   text.className = 'alert-bar-text';
   const required = passesRequired(sessionType);
   text.innerHTML = `<strong>${escapeHtml(name)}</strong> is still marked certified for ` +
-    `${escapeHtml(sessionType)} on the Dashboard, and ` +
+    `${escapeHtml(sessionType)} on the ${escapeHtml(certBoardLabel(sessionType))} tab, and ` +
     (required > 1
       ? `that leaves only ${onFile} of the ${required} passing recordings it takes to certify. `
       : `that was the last passing grade on file. `) +
-    `Deleting a grade doesn't change the Dashboard on its own — the tick lives on the Roster. ` +
+    `Deleting a grade doesn't change that on its own — the tick lives on the Roster. ` +
     `If the certification came from that grade, set it back here; if it was signed off some other ` +
     `way, leave it alone.`;
 
@@ -8142,9 +8245,10 @@ function showUncertifyOffer(name, sessionType, announce = true, onFile = 0) {
 // that knows how the sheet's rows map onto sessions, rather than two copies
 // that can drift apart.
 async function fetchSubmissions() {
-  // Out to W: A-S is everything Code.gs writes, T-V is the follow-up state this
-  // page adds afterwards (see FOLLOWUP_* below), and W is the sections tick off
-  // the manual row (MANUAL_SECTIONS_IDX).
+  // Out to Y: A-S is everything Code.gs writes, T-V is the follow-up state this
+  // page adds afterwards (see FOLLOWUP_* below), W is the sections tick off the
+  // manual row (MANUAL_SECTIONS_IDX), X is the transcript link Code.gs writes,
+  // and Y is the human grader's own scores (HUMAN_SCORES_IDX).
   const rows = await sheetsGet(GRADING_SHEET_ID, `A1:${GRADING_LOG_LAST_COLUMN}1000`);
   if (rows.length <= 1) return [];
   // Track each row's real sheet row number (1-indexed, header is row 1) before
@@ -8186,6 +8290,11 @@ async function fetchSubmissions() {
       // "unknown", not a "no" (see manualCertifiedCell).
       sectionsAllPass: manual ? (manual.r[MANUAL_SECTIONS_IDX] || '') : '',
       audioLink: base[6],
+      // The human grader's own per-section scores for this recording (column Y,
+      // Compare tab). Written onto the AI row, but read from either — a value
+      // typed into the manual row's cell by hand should still be found rather
+      // than silently ignored.
+      humanScores: parseHumanScores((ai && ai.r[HUMAN_SCORES_IDX]) || (manual && manual.r[HUMAN_SCORES_IDX]) || ''),
       // Written by Code.gs onto the AI row, so read it from there — a manual row
       // never has one. Blank on every session graded before V16.
       transcriptLink: (ai && ai.r[TRANSCRIPT_LINK_IDX]) || '',
@@ -8205,6 +8314,7 @@ async function fetchSubmissions() {
       manualFeedback: r[7] === 'AI' ? '' : (r[MANUAL_FEEDBACK_IDX] || ''),
       sectionsAllPass: r[7] === 'AI' ? '' : (r[MANUAL_SECTIONS_IDX] || ''),
       audioLink: r[6],
+      humanScores: parseHumanScores(r[HUMAN_SCORES_IDX] || ''),
       transcriptLink: r[7] === 'AI' ? (r[TRANSCRIPT_LINK_IDX] || '') : '',
       aiRow: r[7] === 'AI' ? r : null,
       aiRowNumber: r[7] === 'AI' ? rowNumber : null
@@ -8360,9 +8470,11 @@ async function loadRecentLog() {
             throw new Error('this row has no Sheet row recorded against it, so there is nothing to clear. Refresh and try again.');
           }
           for (const rowNumber of rowNumbers) {
-            // Out to W, not A:S — a deleted session must take its follow-up
-            // state (T-V) and its sections tick (W) with it, or the Follow-Ups
-            // tab keeps a ghost row and the Sheet keeps an orphaned Yes.
+            // Out to GRADING_LOG_LAST_COLUMN, not A:S — a deleted session must
+            // take its follow-up state (T-V), its sections tick (W), its
+            // transcript link (X) and its human grade (Y) with it, or the
+            // Follow-Ups tab keeps a ghost row and the Sheet keeps an orphaned
+            // Yes and a calibration grade for a recording that's gone.
             await sheetsClearRange(GRADING_SHEET_ID, `A${rowNumber}:${GRADING_LOG_LAST_COLUMN}${rowNumber}`);
           }
 
@@ -8490,31 +8602,106 @@ function passesRequired(sessionType) { return SESSION_PASSES_REQUIRED[sessionTyp
    Phase 2 is "refine the prompt until the AI lines up with the district
    manager", so the arithmetic here only ever measures AI against human. */
 
-// A typed-in human grade is kept in localStorage, NOT written to the Grading
-// Log. Two reasons, and the second is the real one: a Sheet column would need
-// Y (X is now the transcript link) plus a matching bump to
-// GRADING_LOG_LAST_COLUMN, and this view is explicitly speculative — Jordan
-// asked for it knowing it might not get used. Local storage costs nothing to
-// abandon. If the view earns its place, promoting these to a column is the
-// upgrade, and the note under the table says so rather than letting anyone
-// assume their colleagues can see what they typed.
+/* Typed-in human grades LIVED in localStorage until 2026-08-14 and now live in
+   the Grading Log, at column Y, one grade per recording. Jordan asked for a
+   save on the typed scores and chose the Sheet over this browser, which is the
+   upgrade the original note here said to make if the tab earned its place.
+
+   What that buys, and it's the whole reason: a colleague opening Compare sees
+   the same reference grade, clearing site data no longer wipes the Phase 2
+   record, and the calibration numbers sit next to the AI numbers they're
+   measured against instead of in one person's browser.
+
+   localStorage is NOT gone — it's the crash mat. Typing goes into a draft that
+   is mirrored there on every keystroke, so closing the tab mid-grade loses
+   nothing, and only pressing Save writes to the Sheet. Without that, the cost
+   of moving to a shared store would have been "type eight numbers, navigate
+   away, lose all eight". */
 const HUMAN_GRADE_STORE_PREFIX = 'deco-human-grade:';
 
-function humanGradeKey(person, sessionType) {
+// Keyed by Grading Log row number, because a human grade now belongs to one
+// RECORDING. The old key was person + session type, which is why any grade
+// found under that shape gets offered for re-filing rather than loaded blind —
+// see compareLegacyGrades().
+function humanDraftKey(rowNumber) { return HUMAN_GRADE_STORE_PREFIX + 'row:' + rowNumber; }
+function legacyHumanGradeKey(person, sessionType) {
   return HUMAN_GRADE_STORE_PREFIX + person + '::' + sessionType;
 }
-// Wrapped because localStorage THROWS rather than returning null in a private
-// window or with site data blocked — the same lesson as saveToken and the theme
-// toggle. A blocked store must cost the typed numbers, never the page.
-function loadHumanGrades(person, sessionType) {
+
+/* Wrapped because localStorage THROWS rather than returning null in a private
+   window or with site data blocked — the same lesson as saveToken and the theme
+   toggle. A blocked store must cost the crash mat, never the page: the draft
+   still lives in memory for as long as the tab is open, and Save still works,
+   because the Sheet is the real store now. */
+function loadLocalJson(key) {
   try {
-    const parsed = JSON.parse(localStorage.getItem(humanGradeKey(person, sessionType)) || 'null');
-    return (parsed && typeof parsed === 'object') ? parsed : {};
-  } catch (e) { return {}; }
+    const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+    return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : null;
+  } catch (e) { return null; }
 }
-function saveHumanGrades(person, sessionType, grades) {
-  try { localStorage.setItem(humanGradeKey(person, sessionType), JSON.stringify(grades)); return true; }
-  catch (e) { console.warn('Could not save the human grade on this browser:', e); return false; }
+function saveLocalJson(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+  catch (e) { console.warn('Could not keep a local copy of the typed scores:', e); return false; }
+}
+function clearLocalJson(key) {
+  try { localStorage.removeItem(key); } catch (e) { /* nothing to clear */ }
+}
+
+/* Column Y's format. JSON, like column S, because it has to round-trip exactly
+   — a readable "Opening: 9; Discovery: 7" would have to be re-parsed out of
+   free text somebody can edit in the Sheet, and a mis-parse here silently
+   changes a calibration figure.
+
+   Everything about reading it is defensive for the same reason: a cell somebody
+   typed a sentence into, or half-deleted, must come back as "no grade recorded"
+   rather than as a partial one. A partial human grade is worse than none — the
+   totals row would quietly report a number nobody stands behind. */
+function parseHumanScores(cell) {
+  const parsed = (() => {
+    const text = String(cell || '').trim();
+    if (!text) return null;
+    try {
+      const p = JSON.parse(text);
+      return (p && typeof p === 'object' && !Array.isArray(p)) ? p : null;
+    } catch (e) { return null; }
+  })();
+  if (!parsed) return {};
+  const out = {};
+  Object.keys(parsed).forEach(k => {
+    const n = Number(parsed[k]);
+    if (parsed[k] !== '' && parsed[k] !== null && !Number.isNaN(n)) out[k] = n;
+  });
+  return out;
+}
+function serializeHumanScores(scores) {
+  const keys = Object.keys(scores || {}).sort();
+  if (!keys.length) return '';
+  const obj = {};
+  keys.forEach(k => { obj[k] = scores[k]; });
+  return JSON.stringify(obj);
+}
+// Order-independent, so "is this different from what's in the Sheet?" can't
+// answer yes purely because two objects were built in a different order.
+function humanScoresSignature(scores) {
+  const keys = Object.keys(scores || {}).sort();
+  return keys.map(k => k + '=' + scores[k]).join(',');
+}
+
+/* Unsaved edits, keyed by Grading Log row number. Held outside the render
+   because Compare re-renders on every blur — a draft kept in the DOM would be
+   destroyed by the very act of showing the delta it just changed. */
+let compareDrafts = new Map();
+
+function compareHumanFor(run) {
+  const rowNumber = run.sub.aiRowNumber;
+  if (rowNumber && compareDrafts.has(rowNumber)) return compareDrafts.get(rowNumber);
+  return run.sub.humanScores || {};
+}
+function compareRunDirty(run) {
+  const rowNumber = run.sub.aiRowNumber;
+  if (!rowNumber || !compareDrafts.has(rowNumber)) return false;
+  return humanScoresSignature(compareDrafts.get(rowNumber)) !==
+         humanScoresSignature(run.sub.humanScores || {});
 }
 
 // A transcript-graded session is the one Code.gs wrote a transcript link for
@@ -8594,14 +8781,44 @@ function populateComparePickers() {
   if (keep && names.includes(keep)) personSel.value = keep;
 }
 
+// One run's human grade, the sections actually filled in, and their sum. The
+// total is always the SUM of what's typed, never a separately entered number —
+// two sources for one figure is how they drift apart.
+function compareHumanTotals(run, keys) {
+  const human = compareHumanFor(run);
+  const filled = keys.filter(k => human[k] !== undefined && human[k] !== '' && !Number.isNaN(Number(human[k])));
+  return { human, filled, total: filled.reduce((sum, k) => sum + Number(human[k]), 0) };
+}
+
+// Set after a save so the outcome survives the re-render that follows it.
+let compareSaveNotice = null;
+let compareRerenderQueued = false;
+
+/* Re-rendering is deferred to a timeout so that a Tab out of one box has
+   already landed on the next one by the time the table is rebuilt — that's
+   what lets the focus below be captured and put back. Without it, typing eight
+   numbers means eight lost tab stops. */
+function scheduleCompareRerender() {
+  if (compareRerenderQueued) return;
+  compareRerenderQueued = true;
+  setTimeout(() => { compareRerenderQueued = false; renderCompare(); }, 0);
+}
+
 function renderCompare() {
   const wrap = document.getElementById('compare-wrap');
   if (!wrap) return;
   const person = (document.getElementById('cmp-person') || {}).value || '';
   const sessionType = (document.getElementById('cmp-type') || {}).value || '';
 
+  // Captured before the table is replaced, restored after. See
+  // scheduleCompareRerender for why this is needed at all.
+  const active = document.activeElement;
+  const refocus = (active && active.classList && active.classList.contains('cmp-human-input'))
+    ? { row: active.dataset.row, section: active.dataset.section } : null;
+
   if (!person) {
     wrap.innerHTML = '<div class="empty-state">Pick a person above to line up their gradings side by side.</div>';
+    updateCompareSaveBar([]);
     return;
   }
 
@@ -8609,70 +8826,98 @@ function renderCompare() {
   if (!runs.length) {
     wrap.innerHTML = `<div class="empty-state">No AI grades for ${escapeHtml(person)} on ` +
       `${escapeHtml(sessionType)} yet. Grade a recording on that tab and it will show up here.</div>`;
+    updateCompareSaveBar([]);
     return;
   }
 
-  const human = loadHumanGrades(person, sessionType);
+  // Pull back anything typed but never saved. Only pressing Save writes to the
+  // Sheet now, so without this crash mat, closing the tab mid-grade would throw
+  // away eight numbers with nothing having gone wrong.
+  runs.forEach(r => {
+    const rowNumber = r.sub.aiRowNumber;
+    if (!rowNumber || compareDrafts.has(rowNumber)) return;
+    const stashed = loadLocalJson(humanDraftKey(rowNumber));
+    if (stashed) compareDrafts.set(rowNumber, parseHumanScores(JSON.stringify(stashed)));
+  });
+
   const keys = compareSectionKeys(runs);
   const max = SESSION_MAX_POSSIBLE[sessionType];
   const threshold = SESSION_PASS_THRESHOLD[sessionType];
+  // "Certified" is a claim about the Roster and is only true for the two types
+  // that have a certification column; a conversion call passes or fails. Same
+  // helper the results card uses, so the two can't say different things about
+  // one session.
+  const words = verdictWords(sessionType);
+  const totals = runs.map(r => compareHumanTotals(r, keys));
 
   const heads = runs.map(r => {
     const medium = runMedium(r.sub);
     return `<th><div class="cmp-col-head">` +
       `<span class="cmp-medium ${medium}">${medium === 'transcript' ? 'Transcript' : 'Audio'}</span>` +
       `<span class="cmp-col-when">${escapeHtml(r.sub.when || '')}</span>` +
+      `<span class="cmp-col-when">AI score · your score</span>` +
       `</div></th>`;
   }).join('');
 
   const bodyRows = keys.map(key => {
-    const humanVal = (human[key] === undefined || human[key] === null) ? '' : human[key];
-    const cells = runs.map(r => {
+    const cells = runs.map((r, i) => {
       const section = (r.result.sections || {})[key];
       const score = compareScoreOf(section);
+      const human = totals[i].human;
+      const hv = (human[key] === undefined || human[key] === null) ? '' : human[key];
+      const rowNumber = r.sub.aiRowNumber;
+      // Marked per BOX, not per column: changing one score shouldn't light up
+      // the seven beside it that nobody touched.
+      const savedVal = (r.sub.humanScores || {})[key];
+      const dirty = String(savedVal === undefined || savedVal === null ? '' : savedVal) !== String(hv);
       return `<td>` +
         (score === null
           ? `<span class="cmp-score none">never came up</span>`
-          : `<span class="cmp-score">${score}</span>${compareDeltaChip(score, humanVal)}`) +
+          : `<span class="cmp-score">${score}</span>${compareDeltaChip(score, hv)}`) +
         (section && section.needs_human_review ? `<span class="cmp-cell-note">AI wasn't sure</span>` : '') +
+        `<span class="cmp-human-field"><span class="cmp-human-tag">You</span>` +
+        `<input class="cmp-human-input${dirty ? ' is-dirty' : ''}" type="number" min="0" max="10" step="1" ` +
+        `data-row="${escapeHtml(String(rowNumber || ''))}" data-section="${escapeHtml(key)}" ` +
+        `value="${escapeHtml(String(hv))}"${rowNumber ? '' : ' disabled'} ` +
+        `aria-label="Your score for ${escapeHtml(sectionLabel(key))}, recording of ` +
+        `${escapeHtml(r.sub.when || 'unknown date')}"></span>` +
         `</td>`;
     }).join('');
-    return `<tr><td class="cmp-section-name">${escapeHtml(sectionLabel(key))}</td>${cells}` +
-      `<td><input class="cmp-human-input" type="number" min="0" max="10" step="1" ` +
-      `data-section="${escapeHtml(key)}" value="${escapeHtml(String(humanVal))}" ` +
-      `aria-label="Human score for ${escapeHtml(sectionLabel(key))}"></td></tr>`;
+    return `<tr><td class="cmp-section-name">${escapeHtml(sectionLabel(key))}</td>${cells}</tr>`;
   }).join('');
 
-  const filledKeys = keys.filter(k => human[k] !== undefined && human[k] !== '' && !Number.isNaN(Number(human[k])));
-  const humanTotal = filledKeys.reduce((sum, k) => sum + Number(human[k]), 0);
-
-  const totalCells = runs.map(r => {
+  const totalCells = runs.map((r, i) => {
     const t = r.result.total_score;
+    const { filled, total } = totals[i];
+    // A part-filled column says how many sections are behind the number, so it
+    // can never be read as a finished grade.
     return `<td><span class="cmp-score">${(t === null || t === undefined) ? '—' : t}</span>` +
-      (max ? `<span class="cmp-cell-note">of ${max}</span>` : '') + `</td>`;
+      (max ? `<span class="cmp-cell-note">of ${max}</span>` : '') +
+      `<span class="cmp-human-total">You: ${filled.length ? total : '—'}</span>` +
+      `<span class="cmp-cell-note">${filled.length === keys.length
+        ? (max ? `of ${max}` : 'all sections')
+        : `${filled.length} of ${keys.length} filled in`}</span></td>`;
   }).join('');
 
-  // The human total is the SUM of what's been typed, never a separately typed
-  // number — two sources for one figure is how they drift apart. It says how
-  // many sections are behind it so a part-filled column can't read as a grade.
-  const humanTotalCell = `<td><span class="cmp-score">${filledKeys.length ? humanTotal : '—'}</span>` +
-    `<span class="cmp-cell-note">${filledKeys.length === keys.length
-      ? (max ? `of ${max}` : 'all sections')
-      : `${filledKeys.length} of ${keys.length} filled in`}</span></td>`;
+  const verdictCells = runs.map((r, i) => {
+    const { human, filled, total } = totals[i];
+    const ai = r.result.certified;
+    const aiWord = ai === 'Yes' ? words.yes : (ai === 'No' ? words.no : (ai || '—'));
+    // Only once every section has a number: the rule is "total at or above the
+    // bar AND every section at 6", and a half-filled column can't answer the
+    // second half.
+    const humanWord = (filled.length === keys.length && threshold)
+      ? ((total >= threshold && filled.every(k => Number(human[k]) >= SECTION_PASS_MARK)) ? words.yes : words.no)
+      : '—';
+    return `<td>${escapeHtml(aiWord)}` +
+      `<span class="cmp-human-total">You: ${escapeHtml(humanWord)}</span></td>`;
+  }).join('');
 
-  const verdictCells = runs.map(r =>
-    `<td>${r.result.certified ? escapeHtml(r.result.certified) : '—'}</td>`).join('');
-  const humanVerdict = filledKeys.length === keys.length && threshold
-    ? ((humanTotal >= threshold && filledKeys.every(k => Number(human[k]) >= SECTION_PASS_MARK)) ? 'Yes' : 'No')
-    : '—';
-
-  // What the grader wrote when each of these sessions was submitted. It belongs
-  // under the run column rather than the human one because each column IS one
-  // session — the note came in on the same form as that recording — and it's
-  // the closest thing on this tab to "why the human graded it that way", which
-  // is the question the whole tab exists to answer. Only drawn when at least
-  // one session has a note; an empty row of dashes earns nothing on a table
-  // already this wide.
+  // What the grader wrote when each of these sessions was submitted — the
+  // closest thing on this tab to "why the human graded it that way", which is
+  // the question the whole tab exists to answer. Only drawn when at least one
+  // session has a note; an empty row of dashes earns nothing on a table already
+  // this wide.
   const anyNote = runs.some(r => manualNoteOf(r.sub));
   const noteRow = anyNote
     ? `<tr class="cmp-note-row"><td class="cmp-section-name">Grader's note</td>` +
@@ -8681,41 +8926,212 @@ function renderCompare() {
         return `<td>${note
           ? `<span class="cmp-note-text">${escapeHtml(note)}</span>`
           : `<span class="cmp-cell-note">none written</span>`}</td>`;
-      }).join('') +
-      `<td><span class="cmp-cell-note">typed on the grading form</span></td></tr>`
+      }).join('') + `</tr>`
     : '';
 
   wrap.innerHTML =
-    compareSummary(runs, keys, human, filledKeys, humanTotal, max) +
+    compareLegacyGradeNotice(person, sessionType) +
+    compareSummary(runs, keys, max) +
     `<div class="cmp-scroll"><table class="cmp-table">` +
-      `<thead><tr><th>Section</th>${heads}` +
-        `<th><div class="cmp-col-head"><span class="cmp-medium human">Human</span>` +
-        `<span class="cmp-col-when">type it in</span></div></th></tr></thead>` +
+      `<thead><tr><th>Section</th>${heads}</tr></thead>` +
       `<tbody>${bodyRows}` +
-        `<tr class="cmp-total-row"><td class="cmp-section-name">Total</td>${totalCells}${humanTotalCell}</tr>` +
-        `<tr class="cmp-verdict-row"><td class="cmp-section-name">Certified</td>${verdictCells}` +
-        `<td>${humanVerdict}</td></tr>` +
+        `<tr class="cmp-total-row"><td class="cmp-section-name">Total</td>${totalCells}</tr>` +
+        `<tr class="cmp-verdict-row"><td class="cmp-section-name">Verdict</td>${verdictCells}</tr>` +
         noteRow +
       `</tbody></table></div>` +
-    `<div class="cmp-storage-note">The human column is saved <strong>on this browser only</strong> — it isn't ` +
-    `written to the Grading Log, so a colleague opening this page won't see it. Log what you learn in the ` +
-    `Phase 2 decisions Sheet, which is the shared record.</div>`;
+    `<div class="cmp-storage-note">Your scores are saved to the <strong>Grading Log</strong> (column ` +
+    `${GRADING_LOG_LAST_COLUMN}, one grade per recording), so colleagues see them too and clearing this ` +
+    `browser won't lose them. Nothing is written until you press Save. Log what you <em>learn</em> in the ` +
+    `Phase 2 decisions Sheet — that's the shared record for findings, not scores.</div>`;
 
   wrap.querySelectorAll('.cmp-human-input').forEach(input => {
-    input.addEventListener('change', () => {
-      const store = loadHumanGrades(person, sessionType);
-      const val = input.value.trim();
-      if (val === '') delete store[input.dataset.section];
-      else store[input.dataset.section] = Number(val);
-      saveHumanGrades(person, sessionType, store);
-      renderCompare();   // deltas and both totals move together
-    });
+    // Typing updates the draft but does NOT rebuild the table — that would
+    // fight the caret. The rebuild (and with it the deltas, totals and verdict)
+    // happens on the way out of the box.
+    input.addEventListener('input', () => { commitCompareInput(input, runs); updateCompareSaveBar(runs); });
+    input.addEventListener('change', () => { commitCompareInput(input, runs); scheduleCompareRerender(); });
   });
+
+  const forget = wrap.querySelector('#cmp-forget-legacy');
+  if (forget) forget.addEventListener('click', () => {
+    clearLocalJson(legacyHumanGradeKey(person, sessionType));
+    renderCompare();
+  });
+
+  if (refocus) {
+    const back = wrap.querySelector(
+      `.cmp-human-input[data-row="${refocus.row}"][data-section="${cssAttrEscape(refocus.section)}"]`);
+    if (back) back.focus();
+  }
+  updateCompareSaveBar(runs);
+}
+
+// Section keys are our own snake_case identifiers, but they arrive from Gemini,
+// so a quote in one would break out of the attribute selector above.
+function cssAttrEscape(value) { return String(value == null ? '' : value).replace(/["\\]/g, '\\$&'); }
+
+function commitCompareInput(input, runs) {
+  const rowNumber = Number(input.dataset.row);
+  if (!rowNumber) return;
+  const run = runs.find(r => r.sub.aiRowNumber === rowNumber);
+  const base = compareDrafts.has(rowNumber)
+    ? Object.assign({}, compareDrafts.get(rowNumber))
+    : Object.assign({}, (run && run.sub.humanScores) || {});
+  const val = input.value.trim();
+  const num = Number(val);
+  if (val === '' || Number.isNaN(num)) delete base[input.dataset.section];
+  else base[input.dataset.section] = num;
+  compareDrafts.set(rowNumber, base);
+  saveLocalJson(humanDraftKey(rowNumber), base);   // crash mat only — Save writes the Sheet
+  compareSaveNotice = null;
+}
+
+/* The Save button lives in the panel's static markup, OUTSIDE #compare-wrap,
+   and that placement is load-bearing rather than tidiness. Leaving one box and
+   clicking Save fires the box's `change` first; if that rebuilt the button, the
+   mousedown and mouseup would land on different elements and the click would
+   never fire at all — a Save button that does nothing every other press. */
+function updateCompareSaveBar(runs) {
+  const bar = document.getElementById('cmp-save-bar');
+  const btn = document.getElementById('cmp-save-btn');
+  const status = document.getElementById('cmp-save-status');
+  if (!bar || !btn || !status) return;
+
+  bar.classList.toggle('hidden', !runs.length);
+  if (!runs.length) return;
+
+  const dirty = runs.filter(compareRunDirty);
+  btn.disabled = !dirty.length || compareSaveInFlight;
+  btn.textContent = compareSaveInFlight
+    ? 'Saving…'
+    : (dirty.length
+        ? `Save ${dirty.length} recording${dirty.length === 1 ? '' : 's'} to the Grading Log`
+        : 'Save to the Grading Log');
+
+  if (compareSaveInFlight) { status.className = 'cmp-save-status'; status.textContent = ''; return; }
+
+  /* A failure outranks the "unsaved" hint, and that ordering is the whole
+     point. A save that fails leaves the rows dirty, so checking dirty first
+     replaced the reason with "Unsaved — press Save" — the one message that
+     makes a failure look like the user simply hadn't pressed the button yet.
+     The reason has to be readable; editing anything clears it
+     (commitCompareInput), which is when the plain hint comes back. */
+  if (compareSaveNotice && compareSaveNotice.tone === 'err') {
+    status.className = 'cmp-save-status err';
+    status.textContent = compareSaveNotice.text;
+    return;
+  }
+  if (dirty.length) {
+    status.className = 'cmp-save-status dirty';
+    status.textContent = 'Unsaved — kept on this browser until you press Save.';
+    return;
+  }
+  status.className = 'cmp-save-status' + (compareSaveNotice ? ' ' + compareSaveNotice.tone : '');
+  status.textContent = compareSaveNotice ? compareSaveNotice.text : '';
+}
+
+/* Grades typed before 2026-08-14 were stored against a person and a session
+   type rather than a recording, so there is no way to tell which of their
+   recordings each score was about. They are shown rather than loaded: filling
+   them into a column automatically would be the app asserting something it
+   can't know, and on the wrong recording that's a fabricated calibration
+   figure. */
+function compareLegacyGradeNotice(person, sessionType) {
+  const legacy = loadLocalJson(legacyHumanGradeKey(person, sessionType));
+  if (!legacy) return '';
+  const pairs = Object.keys(legacy)
+    .filter(k => legacy[k] !== '' && legacy[k] !== null && !Number.isNaN(Number(legacy[k])))
+    .map(k => `${sectionLabel(k)} ${Number(legacy[k])}`);
+  if (!pairs.length) return '';
+  return `<div class="note"><strong>Scores you typed here before grades moved into the Grading Log.</strong> ` +
+    `They were saved against ${escapeHtml(person)} for every ${escapeHtml(sessionType)} rather than against one ` +
+    `recording, so they can't be matched to a column automatically — type them into the recording they belong ` +
+    `to and press Save. <br>${escapeHtml(pairs.join(' · '))} ` +
+    `<button id="cmp-forget-legacy" class="btn secondary" type="button">Forget these</button></div>`;
+}
+
+let compareSaveInFlight = false;
+
+/* Writes every changed recording's human grade to column Y in one request, then
+   READS THE WHOLE LOG BACK and checks each one actually landed before saying so.
+   That read-back is the same guard writeRosterCell and the delete path already
+   use, and for the same reason: a write that quietly doesn't stick has bitten
+   this app before, and here it would leave somebody's calibration work looking
+   saved while the Sheet has nothing in it.
+
+   The drafts are only dropped for rows that verified. Anything that didn't stays
+   dirty, stays on screen, and stays in this browser's copy — so a partial
+   failure costs a second press of Save, never the numbers. */
+async function saveCompareHumanGrades() {
+  const person = (document.getElementById('cmp-person') || {}).value || '';
+  const sessionType = (document.getElementById('cmp-type') || {}).value || '';
+  const runs = compareRunsFor(person, sessionType);
+  const dirty = runs.filter(compareRunDirty);
+  if (!dirty.length || compareSaveInFlight) return;
+
+  compareSaveInFlight = true;
+  compareSaveNotice = null;
+  updateCompareSaveBar(runs);
+
+  try {
+    if (!(await ensureFreshToken())) throw new Error('not signed in any more — sign in and press Save again');
+
+    const intended = new Map();
+    const data = dirty.map(r => {
+      const rowNumber = r.sub.aiRowNumber;
+      const scores = compareDrafts.get(rowNumber) || {};
+      intended.set(rowNumber, humanScoresSignature(scores));
+      return { range: `${GRADING_LOG_LAST_COLUMN}${rowNumber}`, values: [[serializeHumanScores(scores)]] };
+    });
+    await sheetsBatchUpdate(GRADING_SHEET_ID, data);
+
+    // Label the column, the way the follow-up columns and the sections tick
+    // label theirs, so the Sheet doesn't grow a column of unexplained JSON.
+    // Its own try/catch: the grades are already written by now, and a missing
+    // header must never be reported as a failed save.
+    try {
+      await sheetsBatchUpdate(GRADING_SHEET_ID,
+        [{ range: `${GRADING_LOG_LAST_COLUMN}1`, values: [[HUMAN_SCORES_HEADER]] }]);
+    } catch (headerErr) {
+      console.warn('Could not label the ' + HUMAN_SCORES_HEADER + ' column:', headerErr);
+    }
+
+    // Re-reading the whole log rather than just those cells refreshes the cache
+    // every other tab reads, and proves the round trip through the same parser
+    // the table itself uses.
+    await fetchSubmissions();
+
+    const landed = [], missed = [];
+    intended.forEach((signature, rowNumber) => {
+      const sub = (submissionsCache || []).find(s => s.aiRowNumber === rowNumber);
+      if (sub && humanScoresSignature(sub.humanScores || {}) === signature) landed.push(rowNumber);
+      else missed.push(rowNumber);
+    });
+    landed.forEach(rowNumber => {
+      compareDrafts.delete(rowNumber);
+      clearLocalJson(humanDraftKey(rowNumber));
+    });
+
+    compareSaveNotice = missed.length
+      ? { tone: 'err', text: `Saved ${landed.length} of ${intended.size}. Row ${missed.join(' and ')} didn't ` +
+          `read back — check that row in the Grading Log, then press Save again.` }
+      : { tone: 'ok', text: `Saved to the Grading Log — ${landed.length} recording${landed.length === 1 ? '' : 's'}.` };
+  } catch (e) {
+    // Deliberately does NOT claim nothing was written: a batch update that
+    // throws part-way may still have landed rows, and a confident "nothing
+    // saved" is how somebody overwrites good data on the retry.
+    compareSaveNotice = { tone: 'err', text: 'Could not save — ' + e.message +
+      '. Your scores are still here and still on this browser; check the Grading Log before retrying.' };
+    console.error(e);
+  } finally {
+    compareSaveInFlight = false;
+    renderCompare();
+  }
 }
 
 // The figures worth having above the table. Every one of them is arithmetic on
 // what the table already shows, so the two can't disagree.
-function compareSummary(runs, keys, human, filledKeys, humanTotal, max) {
+function compareSummary(runs, keys, max) {
   const cards = [];
 
   cards.push(`<div class="cmp-summary-card"><div class="cmp-summary-label">AI runs</div>` +
@@ -8757,20 +9173,25 @@ function compareSummary(runs, keys, human, filledKeys, humanTotal, max) {
   }
 
   // Only once there's a human grade to measure against — this is the number
-  // Phase 2 is actually trying to drive down.
-  if (filledKeys.length) {
-    let sum = 0, n = 0;
-    runs.forEach(r => filledKeys.forEach(key => {
+  // Phase 2 is actually trying to drive down. Each run is measured against ITS
+  // OWN human grade, never a shared one, so a person's second recording can't
+  // be scored against the grade someone gave their first.
+  let sum = 0, n = 0;
+  runs.forEach(r => {
+    const human = compareHumanFor(r);
+    keys.forEach(key => {
+      const hv = human[key];
+      if (hv === undefined || hv === '' || hv === null || Number.isNaN(Number(hv))) return;
       const s = compareScoreOf((r.result.sections || {})[key]);
       if (s === null) return;
-      sum += Math.abs(s - Number(human[key]));
+      sum += Math.abs(s - Number(hv));
       n++;
-    }));
-    if (n) {
-      cards.push(`<div class="cmp-summary-card"><div class="cmp-summary-label">AI vs human</div>` +
-        `<div class="cmp-summary-value">${Math.round((sum / n) * 10) / 10}</div>` +
-        `<div class="cmp-summary-sub">avg points apart per section, across ${filledKeys.length} scored</div></div>`);
-    }
+    });
+  });
+  if (n) {
+    cards.push(`<div class="cmp-summary-card"><div class="cmp-summary-label">AI vs human</div>` +
+      `<div class="cmp-summary-value">${Math.round((sum / n) * 10) / 10}</div>` +
+      `<div class="cmp-summary-sub">avg points apart per section, across ${n} compared</div></div>`);
   }
 
   return `<div class="cmp-summary">${cards.join('')}</div>`;
@@ -8790,14 +9211,46 @@ async function loadCompare() {
   renderCompare();
 }
 
-// Which roster column says whether this person is already signed off for the
-// session type they were just graded on. An already-certified person scoring
-// under the bar is a different (and more urgent) situation than a trainee who
-// was never expected to pass yet.
+/* Which roster column says whether this person is already signed off for the
+   session type they were just graded on. An already-certified person scoring
+   under the bar is a different (and more urgent) situation than a trainee who
+   was never expected to pass yet.
+
+   Being in this map is what gives a session type a certification path at all: a
+   passing MANUAL grade ticks the column (certifyOnRoster), a deleted passing
+   grade raises the offer to take it back down (offerUncertifyAfterDelete), and
+   the form previews both before Submit (renderCertPreview).
+
+   Conversion Call was added on 2026-08-14 on Jordan's ask — "if they got a
+   passing grade they are now certified, only for manual entries". That reverses
+   the note at RECRUITING_CERT_COLUMNS saying the five recruiting columns are
+   human-ticked only, FOR THIS ONE TYPE: the other four still have no rubric
+   loaded, so there is no score there to certify off. The safety property is
+   unchanged and is the reason this is allowed at all — only a manual grade a
+   human signed off ever reaches here. An AI grade still never writes to the
+   Roster on any session type, and mustn't until Phase 5. */
 const SESSION_CERT_COLUMN = {
   'Training Day': 'Certified - Training Days',
-  'Team On-Site Day': 'Certified - Team On-Site Days'
+  'Team On-Site Day': 'Certified - Team On-Site Days',
+  'Conversion Call': 'Certified - Conversion Calls'
 };
+
+/* Which roster board carries this session type's certification badge.
+
+   Until Conversion Call was wired in, every certification lived on one board and
+   "the Dashboard" named it unambiguously. It doesn't any more: a Conversion Call
+   tick is on the Recruiting Dashboard, and the other board is labelled
+   Training/TOSD. That matters most on the un-certify bar, whose entire job is to
+   tell somebody a badge on ANOTHER TAB is now wrong — sending them to the wrong
+   tab, where the person genuinely isn't certified, reads as the app being
+   confused. Named off ROSTER_BOARDS so the sentence matches the tab's own
+   label. */
+function certBoardLabel(sessionType) {
+  const column = SESSION_CERT_COLUMN[sessionType];
+  return RECRUITING_CERT_COLUMNS.includes(column)
+    ? ROSTER_BOARDS.recruiting.label
+    : ROSTER_BOARDS.dashboard.label;
+}
 
 // A session has no region of its own — it inherits the region of the person it
 // was about, looked up on the Roster by name. Nothing needs adding to the
