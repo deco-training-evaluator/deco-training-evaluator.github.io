@@ -2290,7 +2290,7 @@
 <!-- Tabs are built from SESSION_TABS in JS so the nav, the panel headings and
      the session type sent for grading can never drift apart. -->
 <nav class="tabs" id="tab-nav">
-  <button id="tab-dashboard-btn" class="active">Training/TOSD</button>
+  <button id="tab-dashboard-btn" class="active">Training/TOSD Dashboard</button>
   <button id="tab-recruiting-btn">Recruiting Dashboard</button>
   <button id="tab-followups-btn">Follow-Ups<span id="followup-count" class="tab-count hidden">0</span></button>
   <button id="tab-compare-btn">Compare</button>
@@ -2428,7 +2428,7 @@
         certify off — those badges are a person's decision and nothing else.
         <br><strong>A passing AI grade never ticks anything here</strong>, on any of the five. Only a grade a
         human signed off moves these columns.
-        <br><strong>Adding someone</strong> is on the Training/TOSD tab, which lists the whole Roster.
+        <br><strong>Adding someone</strong> is on the Training/TOSD Dashboard tab, which lists the whole Roster.
       </div>
       <p id="recruiting-stats-scope" class="stat-scope"></p>
       <div id="recruiting-stats" class="stat-strip" aria-live="polite"></div>
@@ -3794,7 +3794,7 @@ function recruitingColumnsMissing() {
 const ROSTER_BOARDS = {
   dashboard: {
     key: 'dashboard',
-    label: 'Training/TOSD',
+    label: 'Training/TOSD Dashboard',
     ids: {
       section: 'tab-dashboard', wrap: 'dashboard-table-wrap',
       stats: 'dashboard-stats', scope: 'dashboard-stats-scope',
