@@ -1120,6 +1120,29 @@
   .alert-bar-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
   .alert-bar-list li { color: var(--text-primary); font-weight: 600; }
   .alert-bar-list .badge { margin-left: 6px; vertical-align: 1px; }
+  /* One person's waiting certification: who and why on the left, the button on
+     the right. Wraps rather than squeezing, because .alert-bar .btn is
+     white-space:nowrap and a narrow viewport has to be able to drop the button
+     onto its own line instead of pushing the page sideways. */
+  .cert-catchup-item {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px 14px; flex-wrap: wrap;
+    padding: 4px 0;
+  }
+  .cert-catchup-who { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  /* --text-secondary, not --text-muted: this line sits on the bar's own tint,
+     where muted measures around 4:1 and doesn't clear AA at this size. */
+  .cert-catchup-why {
+    font-weight: 500; font-size: 12.5px; line-height: 1.45;
+    color: var(--text-secondary);
+  }
+  /* Armed, waiting on its second click — the same warning tone the armed badge
+     on the table uses, so the idiom reads the same in both places. */
+  .cert-catchup-btn.armed {
+    background: color-mix(in srgb, var(--warning) 22%, var(--surface-1));
+    color: color-mix(in srgb, var(--warning) 78%, var(--text-primary));
+    border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  }
   /* The override tick lives INSIDE the bar, framed as a control, so overriding
      reads as a deliberate answer to the warning rather than as a checkbox
      somebody happened to leave on further down the form. */
@@ -2372,6 +2395,9 @@
              shell (which also scrolls itself into view, since the badge that
              failed can be a long way down the table), a success in one quiet
              line that clears itself. -->
+        <!-- Passing manual grades sitting in the Grading Log that the Roster
+             never caught up with — see renderCertCatchupNotice. -->
+        <div id="dashboard-cert-catchup"></div>
         <div id="dashboard-edit-error"></div>
         <div id="dashboard-edit-status" class="edit-status" aria-live="polite"></div>
         <div id="dashboard-table-wrap" class="roster-table-wrap">
@@ -2420,6 +2446,7 @@
              "Not yet" that can't be clicked, so the bar says exactly which
              headers are missing and offers to add them. -->
         <div id="recruiting-columns-notice"></div>
+        <div id="recruiting-cert-catchup"></div>
         <div id="recruiting-edit-error"></div>
         <div id="recruiting-edit-status" class="edit-status" aria-live="polite"></div>
         <div id="recruiting-table-wrap" class="roster-table-wrap">
@@ -3772,6 +3799,7 @@ const ROSTER_BOARDS = {
       section: 'tab-dashboard', wrap: 'dashboard-table-wrap',
       stats: 'dashboard-stats', scope: 'dashboard-stats-scope',
       region: 'filter-region', role: 'filter-role', search: 'filter-search',
+      certCatchup: 'dashboard-cert-catchup',
       editError: 'dashboard-edit-error', editStatus: 'dashboard-edit-status'
     },
     statusColumns: [
@@ -3803,6 +3831,7 @@ const ROSTER_BOARDS = {
       section: 'tab-recruiting', wrap: 'recruiting-table-wrap',
       stats: 'recruiting-stats', scope: 'recruiting-stats-scope',
       region: 'rc-filter-region', role: 'rc-filter-role', search: 'rc-filter-search',
+      certCatchup: 'recruiting-cert-catchup',
       editError: 'recruiting-edit-error', editStatus: 'recruiting-edit-status'
     },
     statusColumns: RECRUITING_CERT_COLUMNS.map(c => [c, 'cert']),
@@ -3937,6 +3966,231 @@ async function addRecruitingColumnsToRoster(btn) {
   }
 }
 
+/* ---------------- Certifications the Roster never caught up with ------------
+   A passing manual grade certifies somebody at the moment it is submitted
+   (certifyOnRoster). That only ever helped a grade submitted while the
+   machinery was already in place. A Conversion Call graded before that session
+   type had a certification path, or before the Roster had the column to write
+   into, or on a run where the Roster write itself failed, leaves the badge
+   reading "Not yet" with a passing grade sitting in the Grading Log saying
+   otherwise — and nothing ever went back to look. This looks.
+
+   Decisions worth not re-litigating:
+
+   - It OFFERS; it never writes on its own initiative. Same rule as the
+     un-certify bar after a delete: the app is allowed to notice that the two
+     Sheets disagree, a person is the one who resolves it. A page load that
+     quietly signed several people off would be the app deciding, which is the
+     one thing every note in this file says it must not do — and the reason
+     certifying is allowed at all is that a human is behind it.
+   - MANUAL grades only, counted through exactly the same
+     submissionPassedManually / passesRequired path the submit form uses. An AI
+     grade still never moves the Roster; counting AI verdicts here would hand
+     the certification decision to the AI by the back door.
+   - A column the Roster hasn't got is skipped rather than offered. There would
+     be nowhere to write, and renderRecruitingColumnsNotice already explains
+     that case properly — same rule rosterToggleCell follows.
+   - It reads the WHOLE board, not the filtered table. A region filter or a name
+     typed in the search box must not be able to hide a sign-off that is waiting
+     to happen.
+   - A row whose sections tick was never recorded (anything from before column W
+     existed) is listed WITH THAT SAID ON IT, rather than dropped or quietly
+     counted as a Yes. submissionPassedManually treats a blank as "unknown,
+     could have" — which is the right answer for raising a question and the
+     wrong one for certifying somebody without the person seeing it.
+   - The button arms and takes a second click, like every other certification
+     control in this app. */
+
+// A catch-up write is in flight, or one is armed and waiting on its second
+// click. Both are states a background repaint must not pull out from under.
+let certCatchupBusy = false;
+let armedCertCatchup = null;
+
+function disarmCertCatchup() {
+  if (!armedCertCatchup) return;
+  clearTimeout(armedCertCatchup.timeout);
+  armedCertCatchup = null;
+}
+
+/* Everyone on this board who has earned a certification the Roster doesn't
+   show. One entry per person per certification column. */
+function certifiableFromGrades(board) {
+  // Nothing honest to say before the Grading Log has been read — same null-vs-0
+  // distinction passingManualGrades makes, and the same reason certColumnMissing
+  // waits for rosterHeaders.
+  if (!submissionsCache || !rosterHeaders.length) return [];
+  const found = [];
+  boardRoster(board).forEach(person => {
+    const name = (person['Name'] || '').trim();
+    if (!name) return;
+    board.statusColumns.forEach(([column, kind]) => {
+      if (kind !== 'cert') return;
+      if (!rosterHeaders.includes(column)) return;
+      if (isYesValue(person[column])) return;
+      const sessionType = sessionTypeForCertColumn(column);
+      if (!sessionType) return;
+      const passing = submissionsForPerson(name, [sessionType]).filter(submissionPassedManually);
+      const required = passesRequired(sessionType);
+      if (passing.length < required) return;
+      // How many of those rows actually recorded the grader's "every section
+      // reached 6" tick. Short of `required` means the count only gets over the
+      // line on rows that can't answer the second half of the rule.
+      const confirmed = passing.filter(s =>
+        (s.sectionsAllPass || '').trim().toLowerCase() === 'yes').length;
+      found.push({ name, sessionType, column, passing, required, confirmed });
+    });
+  });
+  return found;
+}
+
+// One row's worth of "why this is here" — the grade itself, so the offer can be
+// judged without opening anything.
+function certCatchupWhy(item) {
+  const latest = item.passing[0] || {};
+  const grade = (latest.manualGrade || '').trim();
+  const parts = [];
+  if (item.required > 1) {
+    parts.push(`${plural(item.passing.length, 'passing recording')} on file, ${item.required} needed`);
+    if (grade) parts.push(`most recent ${grade}`);
+  } else {
+    parts.push(grade ? `graded ${grade}` : 'a passing manual grade on file');
+  }
+  const grader = (latest.grader || '').trim();
+  if (grader && grader.toLowerCase() !== 'did not attend') parts.push(`by ${grader}`);
+  if (item.confirmed < item.required) {
+    parts.push(item.passing.length === 1
+      ? 'the "every section reached 6" tick wasn\'t recorded on that row'
+      : 'the "every section reached 6" tick wasn\'t recorded on all of those rows');
+  }
+  return parts.join(' · ');
+}
+
+// What the button will do, in one sentence — tooltip and screen-reader label
+// alike, so the two can't drift apart. Same idea as rosterToggleAction.
+function certCatchupBtnLabel(item) {
+  return `Certify ${item.name} for ${rosterColumnPhrase(item.column)} (asks you to confirm).`;
+}
+
+// Back to the resting label, using the sentence the render left on the element.
+function resetCertCatchupBtn(btn) {
+  btn.classList.remove('armed');
+  btn.textContent = 'Certify';
+  const label = btn.getAttribute('data-label') || '';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+}
+
+function renderCertCatchupNotice(board) {
+  const host = boardEl(board, 'certCatchup');
+  if (!host) return;
+  // The host is about to be rebuilt, so anything armed is pointing at a node
+  // that won't exist in a moment — same housekeeping wireRosterToggles does.
+  disarmCertCatchup();
+  const items = certifiableFromGrades(board);
+  if (!items.length) { host.innerHTML = ''; return; }
+
+  const rows = items.map((item, i) =>
+    `<li class="cert-catchup-item">` +
+      `<span class="cert-catchup-who">${escapeHtml(item.name)} — ` +
+        `${escapeHtml(rosterColumnPhrase(item.column))}` +
+        `<span class="cert-catchup-why">${escapeHtml(certCatchupWhy(item))}</span>` +
+      `</span>` +
+      `<button type="button" class="btn cert-catchup-btn" data-index="${i}"` +
+        // Held on the element so the armed state can be undone without the
+        // handler having to rebuild the sentence.
+        ` data-label="${escapeHtml(certCatchupBtnLabel(item))}"` +
+        ` title="${escapeHtml(certCatchupBtnLabel(item))}"` +
+        ` aria-label="${escapeHtml(certCatchupBtnLabel(item))}">Certify</button>` +
+    `</li>`).join('');
+
+  host.innerHTML =
+    `<div class="alert-bar">` +
+      `<div class="alert-bar-icon">${alertIcon()}</div>` +
+      `<div class="alert-bar-body">` +
+        `<div class="alert-bar-title">` +
+          `${items.length === 1 ? 'Someone has' : `${items.length} people have`} a passing grade the Roster hasn't recorded` +
+        `</div>` +
+        `<div>A passing manual grade certifies somebody as it's submitted, so these were graded ` +
+          `before that could happen — before the column existed on the Roster, or on a run where the ` +
+          `Roster write didn't land. Certifying writes "Yes" into the Roster, exactly as clicking the ` +
+          `badge on their row would. Nothing here counts an AI grade.</div>` +
+        `<ul class="alert-bar-list">${rows}</ul>` +
+        `<div class="alert-bar-text notice-err" id="${board.ids.certCatchup}-error"></div>` +
+      `</div>` +
+    `</div>`;
+
+  host.querySelectorAll('.cert-catchup-btn').forEach(btn => {
+    btn.addEventListener('click', () =>
+      onCertCatchupClick(btn, items[Number(btn.getAttribute('data-index'))], board));
+  });
+}
+
+/* First click arms, second click writes. A sign-off gets a second look here for
+   the same reason the badge on the table does. */
+function onCertCatchupClick(btn, item, board) {
+  if (!item || btn.disabled || certCatchupBusy) return;
+  if ((armedCertCatchup && armedCertCatchup.btn) !== btn) {
+    if (armedCertCatchup) {
+      // Only one armed at a time, so a second offer can't be confirmed by a
+      // click somebody aimed at the first.
+      const previous = armedCertCatchup.btn;
+      disarmCertCatchup();
+      resetCertCatchupBtn(previous);
+    }
+    btn.classList.add('armed');
+    // Short deliberately. .alert-bar .btn is white-space:nowrap, and a long
+    // label in this bar has already pushed the page into horizontal scroll at
+    // 375px once — the full sentence goes on the tooltip and the aria-label.
+    btn.textContent = 'Confirm?';
+    const ask = `Click again to certify ${item.name} for ${rosterColumnPhrase(item.column)}.`;
+    btn.title = ask;
+    btn.setAttribute('aria-label', ask);
+    armedCertCatchup = { btn, timeout: setTimeout(() => {
+      disarmCertCatchup();
+      resetCertCatchupBtn(btn);
+    }, 5000) };
+    return;
+  }
+  disarmCertCatchup();
+  btn.classList.remove('armed');
+  certifyFromCatchup(btn, item, board);
+}
+
+async function certifyFromCatchup(btn, item, board) {
+  const errEl = document.getElementById(`${board.ids.certCatchup}-error`);
+  if (errEl) errEl.textContent = '';
+  const what = rosterColumnPhrase(item.column);
+  certCatchupBusy = true;
+  btn.disabled = true;
+  btn.textContent = 'Certifying…';
+  try {
+    // writeRosterCell rather than certifyOnRoster: it reads the cell back before
+    // anything on screen changes, which is what stops the badge claiming a
+    // certification the Sheet doesn't actually have.
+    await writeRosterCell(item.name, item.column, 'Yes');
+    // Repaint rather than patch: this row has to leave the list, the badge on
+    // the table has to turn green, and both stat strips count the column. Keeps
+    // an expanded row open, unlike a plain renderDashboardTable.
+    renderDashboardKeepingOpenRow();
+    showRosterEditStatus(`Saved — ${item.name} is now certified for ${what}.`, board);
+    // The rest of what reads a certification value, by name — same four the
+    // badge toggles refresh.
+    Object.values(ROSTER_BOARDS).forEach(renderDashboardStats);
+    populateTraineeDropdown();
+    renderPrereqGate();
+    renderCertPreview();
+  } catch (e) {
+    // Nothing was written, so nothing on screen moves; the offer stays exactly
+    // where it was with the reason underneath it.
+    if (errEl) errEl.textContent = `Couldn't certify ${item.name} — ${e.message}`;
+    else showRosterEditError(`Couldn't certify ${item.name} for ${what} — ${e.message}`, '', board);
+    btn.disabled = false;
+    resetCertCatchupBtn(btn);
+  } finally {
+    certCatchupBusy = false;
+  }
+}
+
 function renderDashboardTable(board) {
   const region = boardEl(board, 'region').value;
   const role = boardEl(board, 'role').value;
@@ -3953,6 +4207,10 @@ function renderDashboardTable(board) {
   // The notice about missing Roster columns is drawn with the table it's about,
   // so a Refresh that adds the columns takes it away.
   renderRecruitingColumnsNotice();
+  // Same reasoning: drawn with the table, so certifying somebody takes their row
+  // off the list. Deliberately computed over the whole board rather than the
+  // filtered rows below — a filter must not hide a sign-off that's waiting.
+  renderCertCatchupNotice(board);
   const wrap = boardEl(board, 'wrap');
   if (!filtered.length) { wrap.innerHTML = '<div class="empty-state">No matching people.</div>'; return; }
 
@@ -4543,7 +4801,10 @@ function certProgressLabel(person, column, value) {
 let rosterEditBusy = false;
 let armedRosterToggle = null;
 let rosterEditStatusTimer = null;
-function rosterEditInProgress() { return rosterEditBusy || addPersonBusy || recruitingColumnsBusy || !!armedRosterToggle; }
+function rosterEditInProgress() {
+  return rosterEditBusy || addPersonBusy || recruitingColumnsBusy || certCatchupBusy ||
+    !!armedRosterToggle || !!armedCertCatchup;
+}
 
 function isYesValue(val) { return (val || '').toString().trim().toLowerCase() === 'yes'; }
 
@@ -5768,8 +6029,14 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     // try/catch: the grade is already saved, and a missing header must never be
     // reported as a failed submission.
     try {
+      // The tick's OWN column, derived from the index the value is written at —
+      // never GRADING_LOG_LAST_COLUMN. Those were the same cell when W was the
+      // last column, and the header write silently followed it out to X and then
+      // Y as the log grew, labelling two other people's columns "All Sections
+      // 6+" (both are wrong in the live sheet as a result). The values were
+      // always correct; only the labels moved.
       await sheetsBatchUpdate(GRADING_SHEET_ID,
-        [{ range: `${GRADING_LOG_LAST_COLUMN}1`, values: [[MANUAL_SECTIONS_HEADER]] }]);
+        [{ range: `${columnLetter(MANUAL_SECTIONS_IDX)}1`, values: [[MANUAL_SECTIONS_HEADER]] }]);
     } catch (headerErr) {
       console.warn('Could not label the ' + MANUAL_SECTIONS_HEADER + ' column:', headerErr);
     }
@@ -9081,7 +9348,10 @@ async function saveCompareHumanGrades() {
       const rowNumber = r.sub.aiRowNumber;
       const scores = compareDrafts.get(rowNumber) || {};
       intended.set(rowNumber, humanScoresSignature(scores));
-      return { range: `${GRADING_LOG_LAST_COLUMN}${rowNumber}`, values: [[serializeHumanScores(scores)]] };
+      // This column, not "whatever the last column happens to be" — the two are
+      // the same cell today and would quietly stop being on the next column
+      // added to the log. See the sections-tick header for how that ends.
+      return { range: `${columnLetter(HUMAN_SCORES_IDX)}${rowNumber}`, values: [[serializeHumanScores(scores)]] };
     });
     await sheetsBatchUpdate(GRADING_SHEET_ID, data);
 
@@ -9091,7 +9361,7 @@ async function saveCompareHumanGrades() {
     // header must never be reported as a failed save.
     try {
       await sheetsBatchUpdate(GRADING_SHEET_ID,
-        [{ range: `${GRADING_LOG_LAST_COLUMN}1`, values: [[HUMAN_SCORES_HEADER]] }]);
+        [{ range: `${columnLetter(HUMAN_SCORES_IDX)}1`, values: [[HUMAN_SCORES_HEADER]] }]);
     } catch (headerErr) {
       console.warn('Could not label the ' + HUMAN_SCORES_HEADER + ' column:', headerErr);
     }
