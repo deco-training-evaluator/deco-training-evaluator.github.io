@@ -6264,6 +6264,20 @@ const PRICE_CACHED_IN_PER_MTOK = 0.15;
 // and every cost on the form was 22% too high before this.
 const AUDIO_TOKENS_PER_SECOND = 25;
 const GRADING_PASS_COUNT = 3;
+/* Mirrors GRADING_RUNS_BY_SESSION_TYPE in Code.gs (V18.3, Jordan 2026-08-15):
+   a Training Day recording is read ONCE, everything else three times and
+   reconciled. One more duplicated constant on the pile, and the usual rule
+   applies — the backend is what actually decides how many passes fire; this
+   copy exists so the price quoted on the form before Submit is the price that
+   gets spent. A stale copy here misquotes a figure, it does not change what
+   runs. Any type not listed uses GRADING_PASS_COUNT. */
+const GRADING_PASSES_BY_SESSION_TYPE = {
+  'Training Day': 1
+};
+function gradingPassesFor(sessionType) {
+  const passes = GRADING_PASSES_BY_SESSION_TYPE[sessionType];
+  return (typeof passes === 'number' && passes >= 1) ? Math.floor(passes) : GRADING_PASS_COUNT;
+}
 const GRADING_OUTPUT_TOKENS = 3500;   // one grading pass's JSON, measured off live rows
 // MEASURED 2026-08-14, and it was the biggest single error in the sizing. This
 // was a reasoned guess of 2.2 (150 words/min, 1.33 tokens/word, two-thirds of
@@ -6430,10 +6444,15 @@ function transcriptWindows(seconds) {
   return out;
 }
 
-function estimateGradingCost(seconds) {
+// sessionType decides how many grading passes get paid for (V18.3) — a Training
+// Day is read once, everything else three times. Defaulted so a caller that
+// doesn't know the type still gets the old three-pass figure rather than a
+// silently cheap-looking one.
+function estimateGradingCost(seconds, sessionType) {
+  const passes = gradingPassesFor(sessionType);
   const audioTokens = Math.max(0, seconds || 0) * AUDIO_TOKENS_PER_SECOND;
   const transcriptTokens = Math.max(0, seconds || 0) * TRANSCRIPT_TOKENS_PER_SECOND;
-  const gradingOut = GRADING_PASS_COUNT * GRADING_OUTPUT_TOKENS;
+  const gradingOut = passes * GRADING_OUTPUT_TOKENS;
   const perM = (tokens, rate) => (tokens / 1e6) * rate;
   // A long recording is transcribed in several windows, and EVERY window sends
   // the whole file again — Gemini cannot bill part of an audio file. So the
@@ -6441,7 +6460,7 @@ function estimateGradingCost(seconds) {
   // would understate an 8-hour session by about $2.80.
   const windows = transcriptWindowCount(seconds);
 
-  const audio = perM(audioTokens * GRADING_PASS_COUNT, PRICE_IN_PER_MTOK) + perM(gradingOut, PRICE_OUT_PER_MTOK);
+  const audio = perM(audioTokens * passes, PRICE_IN_PER_MTOK) + perM(gradingOut, PRICE_OUT_PER_MTOK);
   const transcribeOut = perM(transcriptTokens, PRICE_OUT_PER_MTOK);
   const transcribing = perM(audioTokens * windows, PRICE_IN_PER_MTOK) + transcribeOut;
   // The optimistic figure: the first window pays full price and every window
@@ -6451,14 +6470,15 @@ function estimateGradingCost(seconds) {
   // the headline number.
   const transcribingCached = perM(audioTokens, PRICE_IN_PER_MTOK)
     + perM(audioTokens * (windows - 1), PRICE_CACHED_IN_PER_MTOK) + transcribeOut;
-  const gradingText = perM(transcriptTokens * GRADING_PASS_COUNT, PRICE_IN_PER_MTOK) + perM(gradingOut, PRICE_OUT_PER_MTOK);
+  const gradingText = perM(transcriptTokens * passes, PRICE_IN_PER_MTOK) + perM(gradingOut, PRICE_OUT_PER_MTOK);
 
   return {
-    audio: audio,                        // listen, three times
-    transcript: transcribing + gradingText,  // write it out, then read it three times
+    audio: audio,                        // listen, once per pass
+    transcript: transcribing + gradingText,  // write it out, then read the text once per pass
     transcriptIfCached: transcribingCached + gradingText,
     regrade: gradingText,                // every grading after the first
-    windows: windows
+    windows: windows,
+    passes: passes
   };
 }
 
@@ -6529,7 +6549,7 @@ function describeChosenRecording() {
   if (field) field.classList.remove('hidden');
 
   const { seconds, bytes, medium, choice } = audioPlan;
-  const cost = estimateGradingCost(seconds);
+  const cost = estimateGradingCost(seconds, currentSessionType);
   const mb = Math.max(1, Math.round(bytes / (1024 * 1024)));
   const lengthText = seconds > 0 ? formatDurationWords(seconds) : `${mb} MB`;
 
@@ -6566,8 +6586,9 @@ function describeChosenRecording() {
       + `.</span>`);
     if (dearerThanListening) {
       lines.push(`<span class="audio-plan-line">That is more than the ${escapeHtml(formatMoney(cost.audio))} listening straight through would cost, `
-        + `and it is still the right way round: listening to a recording this long means three calls that each have to swallow the whole thing `
-        + `inside Google's 6-minute limit, which is the part that doesn't finish. Writing it out breaks that into short pieces that do.</span>`);
+        + `and it is still the right way round: listening to a recording this long means `
+        + (cost.passes === 1 ? `a single call that has to swallow the whole thing` : `${cost.passes} calls that each have to swallow the whole thing`)
+        + ` inside Google's 6-minute limit, which is the part that doesn't finish. Writing it out breaks that into short pieces that do.</span>`);
     }
     if (seconds > 0 && cost.regrade < cost.audio) {
       lines.push(`<span class="audio-plan-line audio-plan-saving">Grading this session again later costs about ${escapeHtml(formatMoney(cost.regrade))}, because the recording never has to be read a second time.</span>`);
@@ -6588,8 +6609,34 @@ function describeChosenRecording() {
       lines.push(`<span class="audio-plan-line">Short enough that writing it out first would save about ${escapeHtml(formatMoney(Math.max(0, cost.audio - cost.transcript)))} and cost you tone — so this is the better way round.</span>`);
     }
     if (seconds >= TRANSCRIPT_PREFERRED_SECONDS) {
-      lines.push(`<span class="audio-plan-line">On a recording this long, listening is three long calls in one go and may run past Google's 6-minute limit. Writing it out first is the safer route.</span>`);
+      // "Safer" is about FINISHING, not about money — listening means a call
+      // that has to swallow the whole recording inside 6 minutes, and that is
+      // the thing that may not come back. But on a long one-pass session type
+      // the safer route is now many times dearer than the one being quoted
+      // directly above it, and a box that recommends a route without saying it
+      // costs twenty times the figure beside it is giving advice that
+      // contradicts its own numbers. So say the difference out loud.
+      const dearer = cost.transcript - cost.audio;
+      lines.push(`<span class="audio-plan-line">On a recording this long, listening means `
+        + (cost.passes === 1 ? `one long call` : `${cost.passes} long calls`)
+        + ` in one go and may run past Google's 6-minute limit. Writing it out first is the safer route`
+        + (dearer > 0.01
+            ? ` — but on this recording it costs about ${escapeHtml(formatMoney(cost.transcript))} rather than ${escapeHtml(formatMoney(cost.audio))}, `
+              + `because it has to be read once per pass. Worth listening first and keeping that in reserve.`
+            : `.`)
+        + `</span>`);
     }
+  }
+  // V18.3. Said on BOTH routes, because it is true of both — the pass count is
+  // how many times the grader reads the evidence, whether that evidence is the
+  // audio or the transcript. It belongs on the form rather than only on the
+  // finished card: it is half of why the price above is a third of what this
+  // session type used to cost, and somebody reading a cheaper number deserves
+  // to know what was traded for it before they press Submit.
+  if (cost.passes === 1) {
+    lines.push(`<span class="audio-plan-line">A ${escapeHtml(currentSessionType)} is graded in <strong>one pass</strong>, not the usual three — `
+      + `a recording this long is expensive and heavy to read three times over. The trade: no second opinion behind the scores, `
+      + `so nothing gets flagged as "the passes disagreed here".</span>`);
   }
   lines.push(`<span class="audio-plan-line">Estimates, not a quote — actual cost depends on how much talking is on the recording.</span>`);
   box.innerHTML = lines.join('');
@@ -6676,8 +6723,9 @@ function estimatedPhaseSeconds(audioBytes, medium, audioSeconds) {
       // for the pass currently running — quoting the whole session's time
       // against one pass would have every pass look wildly ahead of schedule.
       transcribe: Math.round(Math.min(330, 45 + (seconds / transcriptWindowCount(seconds)) * 0.012)),
-      // Three passes over ~40k tokens of text, fired together. Seconds, not
-      // minutes — this is the phase the whole change exists to make cheap.
+      // The grading passes over ~40k tokens of text, fired together (one on a
+      // Training Day since V18.3). Seconds, not minutes — this is the phase the
+      // whole change exists to make cheap.
       grade: 45
     };
   }
@@ -6705,7 +6753,8 @@ function describeGradingTransportFailure(rawText, elapsedSeconds, phase) {
   if (looksLikeHtml && nearTheWall) {
     return 'The grading step ran past the 6-minute limit Google puts on this kind of script, so it was cut off. '
       + 'The recording did reach the AI — it is the grading pass that ran out of time. '
-      + 'On a long recording, choosing "Write it out first, then grade the text" avoids this: it turns three long calls into one.';
+      + 'On a long recording, choosing "Write it out first, then grade the text" avoids this: '
+      + 'the recording gets read in short bounded steps, and the grading then works from text instead of audio.';
   }
   if (looksLikeHtml) {
     return 'The grading service answered with a web page instead of a result, which usually means the script errored out. '
@@ -7442,7 +7491,11 @@ function clipChips(clips, interactive) {
 function runScoresLine(runScores) {
   if (!Array.isArray(runScores) || runScores.length < 2) return '';
   const shown = runScores.map(s => (typeof s === 'number' ? String(s) : '—'));
-  return `<div class="ai-run-scores" title="What each of the 3 AI passes scored this section before they were reconciled.">3 passes: ${escapeHtml(shown.join(' · '))}</div>`;
+  // The count comes off the array, never a hardcoded 3. A degraded grade can run
+  // on two passes (V11) and a Training Day runs on one by design (V18.3), so a
+  // literal "3 passes" over two numbers would simply be false. Still not written
+  // as a fraction — see the note on clipChips for why there is no denominator.
+  return `<div class="ai-run-scores" title="What each of the AI's passes scored this section before they were reconciled.">${shown.length} passes: ${escapeHtml(shown.join(' · '))}</div>`;
 }
 
 /* Loads the session audio from Drive on demand and seeks to a cited moment.
