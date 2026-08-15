@@ -13,7 +13,12 @@
      web-font CDN exists for it, so it's loaded from cdnfonts' free embed with a
      close system/Google-Fonts fallback stack in case that's ever unreachable. -->
 <link href="https://fonts.cdnfonts.com/css/caviar-dreams" rel="stylesheet">
-<script src="https://accounts.google.com/gsi/client" async defer onload="onGsiLoad()"></script>
+<!-- Guarded, because this fires the moment Google's script lands and that can be
+     BEFORE the main script at the bottom of the page has defined onGsiLoad —
+     see the note at the end of that script. A bare onGsiLoad() throws a
+     ReferenceError there, and the onload never fires a second time, so the app
+     sits on the sign-in screen with a dead button. -->
+<script src="https://accounts.google.com/gsi/client" async defer onload="window.onGsiLoad && onGsiLoad()"></script>
 <!-- Theme resolution, deliberately INLINE and at the top of <head>, ahead of the
      stylesheet. It has to run before the first paint: done from the main script at
      the bottom of the page instead, the browser would paint the default theme and
@@ -715,7 +720,10 @@
     background: color-mix(in srgb, var(--good) 20%, var(--page));
     box-shadow: inset 4px 0 0 var(--good);
   }
-  #dashboard-table-wrap, #recent-log-wrap {
+  /* .roster-table-wrap is a CLASS rather than #dashboard-table-wrap because
+     there are two roster tables now — Training/TOSD and Recruiting — and they
+     have to look identical. Two copies of these rules is how they drift. */
+  .roster-table-wrap, #recent-log-wrap {
     overflow-x: auto;
     max-width: 100%;
     -webkit-overflow-scrolling: touch;
@@ -756,14 +764,14 @@
   td.region-cell { color: var(--text-secondary); white-space: normal; }
   /* Dashboard roster table: fixed column widths + wrapping text so all 9
      columns always fit in the panel with no horizontal scrolling needed. */
-  #dashboard-table-wrap table { table-layout: fixed; }
-  #dashboard-table-wrap th, #dashboard-table-wrap td {
+  .roster-table-wrap table { table-layout: fixed; }
+  .roster-table-wrap th, .roster-table-wrap td {
     white-space: normal;
     overflow-wrap: break-word;
     padding: 8px 6px;
     font-size: 12px;
   }
-  #dashboard-table-wrap th {
+  .roster-table-wrap th {
     font-size: 10.5px;
     line-height: 1.3;
   }
@@ -782,7 +790,7 @@
     border: 1px solid transparent;
     white-space: nowrap;
   }
-  #dashboard-table-wrap .badge {
+  .roster-table-wrap .badge {
     font-size: 11px;
     padding: 3px 8px;
   }
@@ -1057,6 +1065,10 @@
     color: color-mix(in srgb, var(--critical) 78%, var(--text-primary));
     font-weight: 600;
   }
+  /* .alert-bar-body is a flex column with a gap, so an error line that is
+     usually blank would otherwise push 9px of air into every bar that has one
+     waiting. */
+  .alert-bar .notice-err:empty { display: none; }
   .alert-bar .notice-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
   /* Full-size buttons now, not the shrunken ones this bar used to carry — but
      the hierarchy between them stays exactly as it was. The bar asks a question
@@ -2126,8 +2138,8 @@
      the same expand-where-you-are idiom as Recent Submissions and Follow-Ups
      rather than sending anyone off to hunt for a name they're already looking
      at. The sessions are drawn as divs, not a nested table, because
-     #dashboard-table-wrap sets table-layout:fixed on every table inside it. */
-  #dashboard-table-wrap td.roster-chevron-cell { padding-right: 0; text-align: center; }
+     .roster-table-wrap sets table-layout:fixed on every table inside it. */
+  .roster-table-wrap td.roster-chevron-cell { padding-right: 0; text-align: center; }
   .roster-row { cursor: pointer; }
   .roster-row:hover { background: color-mix(in srgb, var(--brand-orange) 10%, var(--page)); }
   .roster-row.open { background: color-mix(in srgb, var(--brand-orange) 14%, var(--page)); }
@@ -2216,7 +2228,8 @@
 <!-- Tabs are built from SESSION_TABS in JS so the nav, the panel headings and
      the session type sent for grading can never drift apart. -->
 <nav class="tabs" id="tab-nav">
-  <button id="tab-dashboard-btn" class="active">Dashboard</button>
+  <button id="tab-dashboard-btn" class="active">Training/TOSD</button>
+  <button id="tab-recruiting-btn">Recruiting Dashboard</button>
   <button id="tab-followups-btn">Follow-Ups<span id="followup-count" class="tab-count hidden">0</span></button>
   <button id="tab-compare-btn">Compare</button>
 </nav>
@@ -2231,9 +2244,13 @@
 
   <div id="app-content" class="hidden">
 
-    <!-- DASHBOARD TAB -->
+    <!-- TRAINING/TOSD DASHBOARD TAB — the field-training certification path.
+         Renamed from plain "Dashboard" on 2026-08-14 when the Recruiting
+         Dashboard was added beside it: with two roster boards, "Dashboard" no
+         longer says which one. The element IDs keep the word "dashboard" so no
+         other reference in this file had to move. -->
     <section id="tab-dashboard">
-      <span class="pill">DECO | Dashboard</span>
+      <span class="pill">DECO | Training / TOSD</span>
       <div class="note">
         <strong>Certification rule:</strong> once someone has attended the Day 1 meeting/training and watched a
         team on-site day, they can go on team visits without being certified — but they can't run a training
@@ -2314,7 +2331,52 @@
              line that clears itself. -->
         <div id="dashboard-edit-error"></div>
         <div id="dashboard-edit-status" class="edit-status" aria-live="polite"></div>
-        <div id="dashboard-table-wrap">
+        <div id="dashboard-table-wrap" class="roster-table-wrap">
+          <div class="empty-state">Loading roster…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RECRUITING DASHBOARD TAB — the same roster board, pointed at the
+         recruiting certification path instead of the field-training one.
+         Jordan's ask (2026-08-14). Two things make it a separate tab rather
+         than five more columns on the one above: the columns are a different
+         path through the company, and it answers for a different set of people
+         (Regional Managers and upwards — Field Managers don't recruit).
+
+         It shares every render function with the Training/TOSD board — see
+         ROSTER_BOARDS — so the two can't drift apart in look or behaviour. -->
+    <section id="tab-recruiting" class="hidden">
+      <span class="pill">DECO | Recruiting Dashboard</span>
+      <div class="note">
+        <strong>Who's on this list:</strong> Regional Managers and upwards. Field Managers don't recruit, so
+        they're left off — everyone else on the Roster is here, including any role added later.
+        <br><strong>Changing a status:</strong> click any badge to change it — it writes straight back to the
+        Roster sheet, and asks you to click again to confirm.
+        <br><strong>These are tracked, not graded.</strong> Ticking someone off here is a person's decision,
+        exactly like the certifications on the Training/TOSD tab. A passing AI grade on a Conversion Call does
+        <em>not</em> tick anything here — the recruiting rubrics are still being calibrated.
+        <br><strong>Adding someone</strong> is on the Training/TOSD tab, which lists the whole Roster.
+      </div>
+      <p id="recruiting-stats-scope" class="stat-scope"></p>
+      <div id="recruiting-stats" class="stat-strip" aria-live="polite"></div>
+      <div class="panel">
+        <div class="filters">
+          <select id="rc-filter-region"><option value="">All regions</option></select>
+          <select id="rc-filter-role"><option value="">All roles</option></select>
+          <input id="rc-filter-search" type="text" placeholder="Search name…">
+          <div class="filter-actions">
+            <button id="refresh-recruiting-btn" class="btn secondary">Refresh</button>
+          </div>
+        </div>
+        <!-- Raised when the Roster is missing some of the five recruiting
+             certification columns. Without them every badge here is a dead
+             "Not yet" that can't be clicked, so the bar says exactly which
+             headers are missing and offers to add them. -->
+        <div id="recruiting-columns-notice"></div>
+        <div id="recruiting-edit-error"></div>
+        <div id="recruiting-edit-status" class="edit-status" aria-live="polite"></div>
+        <div id="recruiting-table-wrap" class="roster-table-wrap">
           <div class="empty-state">Loading roster…</div>
         </div>
       </div>
@@ -2617,6 +2679,12 @@ const ROSTER_ROW_NUMBER = '__rowNumber';
    token (e.g. the existing Apps Script), which is a bigger change than
    this page. */
 const TOKEN_STORAGE_KEY = 'decoTrainingTracker.googleToken';
+/* Which Google account this browser is signed in as, remembered across
+   sessions purely so background renewals can name it — see
+   rememberSignedInAccount() below for why that is the difference between a
+   renewal nobody notices and a popup in somebody's face. */
+const ACCOUNT_STORAGE_KEY = 'decoTrainingTracker.googleAccount';
+let rememberedAccount = null;
 let tokenRefreshTimer = null;
 let tokenWatchdogTimer = null;
 let pendingSilentResolve = null;
@@ -2628,6 +2696,11 @@ let silentRenewInFlight = null;
 let silentRenewStartedAt = 0;
 let silentRenewSeq = 0;
 let renewFailureCount = 0;
+// Set when a renewal times out with Google still not having answered, which
+// most often means a window of its own is open and waiting on the user. Held
+// separately from renewFailureCount because it calls for waiting longer, not
+// for counting higher.
+let silentRenewMayBeOnScreen = false;
 // Whether the app is currently showing its signed-in UI. Guards the watchdog
 // (so it doesn't poke Google behind the sign-in screen) and stops a
 // late-arriving token from re-running every data load underneath someone.
@@ -2643,6 +2716,17 @@ const WATCHDOG_INTERVAL_MS = 30 * 1000;
 // matters when something has gone wrong. 6s was short enough that a slow
 // network or a browser still waking up counted as a hard failure.
 const SILENT_TIMEOUT_MS = 12000;
+// How long to leave a renewal alone once it looks like Google has put something
+// on screen. Long enough that a manager who is reading it, or who wandered off
+// mid-sentence, isn't handed a second one — and still comfortably inside the
+// 5-minute lead, so the session is in no danger while it waits.
+const RENEW_ON_SCREEN_BACKOFF_MS = 90 * 1000;
+// The earliest another renewal may be attempted. BOTH routes into a renewal
+// respect it — the scheduled retry paces itself, and the 30-second watchdog
+// reads it — because without a shared clock the watchdog simply ignores the
+// backoff and re-attempts every 30 seconds for the whole lead window. That is
+// how one failing renewal turns into ten popups instead of one.
+let nextRenewAllowedAt = 0;
 
 // Mirror of what's in localStorage. Storage can be unavailable outright —
 // private windows, blocked site data, a full quota — and `setItem` throws when
@@ -2673,6 +2757,63 @@ function loadStoredToken() {
 function clearStoredToken() {
   tokenMemoryFallback = null;
   try { localStorage.removeItem(TOKEN_STORAGE_KEY); } catch (e) { /* nothing stored to clear */ }
+}
+
+/* ---- Which account to renew as ----------------------------------------
+   THIS IS WHAT STOPS THE "choose an account" POPUP MID-SESSION, and the
+   cause is not obvious from the code that suffers from it.
+
+   A background renewal asks Google for a new token with `prompt: ''`,
+   meaning "don't put anything on screen unless you have to". Google has to
+   when it cannot work out WHICH account to renew — and with more than one
+   Google account signed into the browser it cannot, because nothing in the
+   request names one. DECO staff routinely have three (a personal login plus
+   recruit@ and operations@), so what should have been an invisible renewal
+   every ~55 minutes became an account chooser on top of whatever the manager
+   was doing. Nothing had gone wrong, and nothing on screen said so; it simply
+   looked like being randomly signed out.
+
+   `login_hint` is Google's documented answer — "when successful, account
+   selection is skipped". So the account is remembered here and named on every
+   background renewal.
+
+   Deliberately NOT sent when somebody presses Sign in: that is a considered
+   click, and a hint there would quietly deny them the chance to pick a
+   different one of their accounts. Only renewals are hinted, because only
+   renewals must never interrupt. */
+function loadRememberedAccount() {
+  try { return localStorage.getItem(ACCOUNT_STORAGE_KEY) || null; } catch (e) { return null; }
+}
+function saveRememberedAccount(email) {
+  rememberedAccount = email || null;
+  // Blocked storage costs the hint across reloads and nothing else — the
+  // in-memory copy above still covers the life of this tab, which is where
+  // the renewals that matter happen.
+  try {
+    if (email) localStorage.setItem(ACCOUNT_STORAGE_KEY, email);
+    else localStorage.removeItem(ACCOUNT_STORAGE_KEY);
+  } catch (e) { /* keeps working from memory for the life of this tab */ }
+}
+
+/* Learns the signed-in address once, from Drive's own `about` endpoint.
+   No new OAuth scope: `drive.file` — which this app already holds — is one of
+   the scopes about.get accepts, so this asks for nothing extra and triggers no
+   fresh consent screen for anyone.
+
+   Everything here is best-effort by design. The hint is an optimisation, so a
+   failure must cost the smoothness of the next renewal and never the session:
+   no throw escapes, and nothing waits on it. */
+async function rememberSignedInAccount() {
+  if (rememberedAccount || !accessToken) return;
+  try {
+    const res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)', {
+      headers: { Authorization: 'Bearer ' + accessToken }
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const email = data && data.user && data.user.emailAddress;
+    if (email) saveRememberedAccount(email);
+  } catch (e) { /* renewals just fall back to the old un-hinted behaviour */ }
 }
 
 // Milliseconds of usable life left on the stored token, 0 if there isn't one.
@@ -2723,9 +2864,23 @@ function requestSilentToken() {
   const promise = new Promise((resolve) => {
     pendingSilentResolve = resolve;
     try {
-      tokenClient.requestAccessToken({ prompt: '' });
+      // Naming the account is what keeps this silent when several are signed
+      // in — see the note on rememberSignedInAccount(). Omitted rather than
+      // sent empty when it isn't known yet (a first-ever sign-in), which is
+      // exactly the old behaviour.
+      const opts = { prompt: '' };
+      if (rememberedAccount) opts.login_hint = rememberedAccount;
+      tokenClient.requestAccessToken(opts);
     } catch (e) { settleSilentRenew(null, stamp); return; }
-    setTimeout(() => settleSilentRenew(null, stamp), SILENT_TIMEOUT_MS); // if nothing ever calls back
+    setTimeout(() => {
+      // Nothing called back within the safety window. By far the likeliest
+      // reason is that Google DID put something on screen and it is sitting
+      // there waiting to be answered, so the next attempt is held back — firing
+      // one on the usual 15s backoff would stack a second popup on top of the
+      // first, which is the "it keeps coming up" half of this complaint.
+      if (pendingSilentResolve) silentRenewMayBeOnScreen = true;
+      settleSilentRenew(null, stamp);
+    }, SILENT_TIMEOUT_MS);
   });
   // Gate on it only if it's actually still running — `requestAccessToken` can
   // fail or answer before this line is reached, and gating on a promise that
@@ -2750,11 +2905,23 @@ async function renewToken() {
   const token = await requestSilentToken();
   if (token) {
     renewFailureCount = 0;
+    nextRenewAllowedAt = 0;
+    silentRenewMayBeOnScreen = false;
     if (!signedInUi) onSignedIn(); else setAuthStatus('Signed in');
     return true;
   }
   renewFailureCount++;
-  scheduleTokenRefreshIn(Math.min(15000 * renewFailureCount, 60000));
+  // A renewal that timed out with Google still not having answered waits a good
+  // deal longer than the usual backoff, because the likeliest reason it went
+  // quiet is that it is on screen waiting to be answered.
+  const backoff = silentRenewMayBeOnScreen
+    ? RENEW_ON_SCREEN_BACKOFF_MS
+    : Math.min(15000 * renewFailureCount, 60000);
+  silentRenewMayBeOnScreen = false;
+  // Both routes into a renewal agree on this one clock — see the note on
+  // nextRenewAllowedAt.
+  nextRenewAllowedAt = Date.now() + backoff;
+  scheduleTokenRefreshIn(backoff);
   // Only say anything once the token is actually gone. A renewal that fails
   // with 4 minutes still on the clock is a non-event the user shouldn't see.
   if (signedInUi && tokenLifeLeftMs() <= 0) setAuthStatus('Reconnecting…');
@@ -2771,6 +2938,9 @@ async function renewToken() {
 function checkTokenHealth() {
   if (!tokenClient || !signedInUi) return;
   if (silentRenewInFlight) return;
+  // A retry is already paced and pending; jumping the queue here is what used
+  // to let a failing renewal re-fire every 30 seconds.
+  if (Date.now() < nextRenewAllowedAt) return;
   if (tokenLifeLeftMs() > RENEW_LEAD_MS) return;
   renewToken();
 }
@@ -2814,7 +2984,15 @@ async function ensureFreshToken() {
   return false;
 }
 
+// Either route in can win — Google's onload, or the catch-up check at the end
+// of this script — and they must not both initialise.
+let gsiInitDone = false;
 function onGsiLoad() {
+  if (gsiInitDone) return;
+  gsiInitDone = true;
+  // Before anything can ask for a token, so the very first renewal of a return
+  // visit is already able to name its account.
+  rememberedAccount = loadRememberedAccount();
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
     scope: SCOPES,
@@ -2828,6 +3006,9 @@ function onGsiLoad() {
       accessToken = resp.access_token;
       saveToken(accessToken, resp.expires_in);
       scheduleTokenRefresh(resp.expires_in);
+      // Deliberately not awaited: every renewal from here on is smoother for
+      // knowing the account, but nothing about this one depends on it.
+      rememberSignedInAccount();
       if (pendingSilentResolve) {
         settleSilentRenew(accessToken);
       } else if (!signedInUi) {
@@ -2947,6 +3128,11 @@ document.getElementById('signin-btn').addEventListener('click', () => {
 });
 document.getElementById('signout-btn').addEventListener('click', () => {
   if (accessToken) google.accounts.oauth2.revoke(accessToken, () => {});
+  // Forgotten here and ONLY here. Signing out is how somebody says they want to
+  // come back as a different account, so the next sign-in must offer the
+  // chooser. An expired session is not that — forceSignedOut keeps the hint, so
+  // signing back in stays one click.
+  saveRememberedAccount(null);
   forceSignedOut('Not signed in');
 });
 
@@ -3145,6 +3331,7 @@ function buildMockGradingForm(tab) {
 }
 
 document.getElementById('tab-dashboard-btn').addEventListener('click', () => showTab('dashboard'));
+document.getElementById('tab-recruiting-btn').addEventListener('click', () => showTab('recruiting'));
 document.getElementById('tab-followups-btn').addEventListener('click', () => showTab('followups'));
 document.getElementById('tab-compare-btn').addEventListener('click', () => showTab('compare'));
 document.getElementById('cmp-person').addEventListener('change', renderCompare);
@@ -3171,6 +3358,7 @@ function showTab(name) {
 
   // Panels: dashboard, follow-ups, the one shared grading panel, and one per preview tab.
   document.getElementById('tab-dashboard').classList.toggle('hidden', name !== 'dashboard');
+  document.getElementById('tab-recruiting').classList.toggle('hidden', name !== 'recruiting');
   document.getElementById('tab-followups').classList.toggle('hidden', name !== 'followups');
   document.getElementById('tab-compare').classList.toggle('hidden', name !== 'compare');
   document.getElementById('tab-grading').classList.toggle('hidden', !liveTab);
@@ -3180,6 +3368,7 @@ function showTab(name) {
 
   // Nav highlight.
   document.getElementById('tab-dashboard-btn').classList.toggle('active', name === 'dashboard');
+  document.getElementById('tab-recruiting-btn').classList.toggle('active', name === 'recruiting');
   document.getElementById('tab-followups-btn').classList.toggle('active', name === 'followups');
   document.getElementById('tab-compare-btn').classList.toggle('active', name === 'compare');
   SESSION_TABS.forEach(t => {
@@ -3324,13 +3513,20 @@ async function sheetsClearRange(spreadsheetId, range) {
 
 /* ---------------------- Dashboard ---------------------- */
 async function loadRoster() {
-  const wrap = document.getElementById('dashboard-table-wrap');
-  wrap.innerHTML = '<div class="empty-state">Loading roster…</div>';
+  // Both boards read this one roster, so both say what's happening to it.
+  const showInBoards = (html) => Object.values(ROSTER_BOARDS).forEach(b => {
+    const w = boardEl(b, 'wrap');
+    if (w) w.innerHTML = html;
+  });
+  showInBoards('<div class="empty-state">Loading roster…</div>');
   if (!(await ensureFreshToken())) return;
   try {
     const rows = await sheetsGet(ROSTER_SHEET_ID, 'A1:Z1000');
-    if (!rows.length) { wrap.innerHTML = '<div class="empty-state">Roster sheet is empty.</div>'; return; }
-    rosterHeaders = rows[0];
+    if (!rows.length) { showInBoards('<div class="empty-state">Roster sheet is empty.</div>'); return; }
+    // Trimmed, because every column in this app is looked up by its exact header
+    // text — a header typed into the Sheet with a trailing space would otherwise
+    // read as a column that isn't there, and render as a badge nobody can click.
+    rosterHeaders = rows[0].map(h => (h || '').trim());
     // The sheet row number is stamped on each person BEFORE blank rows are
     // filtered out. Position in this array is not the row in the Sheet — one
     // empty row anywhere above someone would shift every write below it onto
@@ -3348,34 +3544,43 @@ async function loadRoster() {
     populateFilterOptions();
     populateTraineeDropdown();
     populateGraderDropdown();
-    renderDashboardTable();
+    renderAllDashboards();
     // A Refresh after someone ticks a step on the Roster should take the warning
     // away without the person having to be re-picked.
     renderPrereqGate();
   } catch (e) {
-    wrap.innerHTML = '<div class="empty-state">Could not load roster: ' + e.message + '</div>';
+    showInBoards('<div class="empty-state">Could not load roster: ' + escapeHtml(e.message) + '</div>');
   }
 }
 
 function populateFilterOptions() {
-  const regionSel = document.getElementById('filter-region');
-  const roleSel = document.getElementById('filter-role');
-  // Both selections are kept across a re-read. This runs on every Refresh and
-  // after somebody is added, and rebuilding the options used to silently drop
-  // the filter back to "All" — so the table would widen out under someone who
-  // had narrowed it, while the search box beside it kept what was typed. A
-  // value that has since left the Roster falls back to "All" on its own.
-  const keepDashRegion = regionSel.value;
-  const keepDashRole = roleSel.value;
   // Includes areas that only appear in an Also Covers cell — otherwise a
   // province somebody oversees would be unfilterable. See allRosterRegions.
   const regions = allRosterRegions();
-  const roles = [...new Set(rosterRows.map(r => r['Role']).filter(Boolean))].sort();
   const regionOptions = '<option value="">All regions</option>' + regions.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
-  regionSel.innerHTML = regionOptions;
-  roleSel.innerHTML = '<option value="">All roles</option>' + roles.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
-  regionSel.value = keepDashRegion;
-  roleSel.value = keepDashRole;
+
+  /* Each board's dropdowns offer what that board actually shows: the Recruiting
+     board lists only the roles of the people on it, so picking "Field Manager"
+     there can't return an empty table for a filter that was never going to
+     match anything.
+
+     Both selections are kept across a re-read. This runs on every Refresh and
+     after somebody is added, and rebuilding the options used to silently drop
+     the filter back to "All" — so the table would widen out under someone who
+     had narrowed it, while the search box beside it kept what was typed. A
+     value that has since left the Roster falls back to "All" on its own. */
+  Object.values(ROSTER_BOARDS).forEach(board => {
+    const regionSel = boardEl(board, 'region');
+    const roleSel = boardEl(board, 'role');
+    if (!regionSel || !roleSel) return;
+    const keepRegion = regionSel.value;
+    const keepRole = roleSel.value;
+    const roles = [...new Set(boardRoster(board).map(r => r['Role']).filter(Boolean))].sort();
+    regionSel.innerHTML = regionOptions;
+    roleSel.innerHTML = '<option value="">All roles</option>' + roles.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+    regionSel.value = keepRegion;
+    roleSel.value = keepRole;
+  });
 
   // Follow-Ups filters by the same regions — a graded session has no region of
   // its own, it inherits the region of the person it's about (see regionForPerson).
@@ -3389,16 +3594,12 @@ function populateFilterOptions() {
   populateAddPersonChoices();
 }
 
-['filter-region','filter-role','filter-search'].forEach(id => {
-  document.addEventListener('DOMContentLoaded', () => {});
-});
-document.getElementById('filter-region').addEventListener('change', renderDashboardTable);
-document.getElementById('filter-role').addEventListener('change', renderDashboardTable);
-document.getElementById('filter-search').addEventListener('input', renderDashboardTable);
 document.getElementById('refresh-dashboard-btn').addEventListener('click', () => { loadRoster().then(loadFollowUps); loadRecentLog(); });
+document.getElementById('refresh-recruiting-btn').addEventListener('click', () => { loadRoster().then(loadFollowUps); loadRecentLog(); });
 
-/* Short header labels keep all 9 Dashboard columns fitting in one view (no
-   horizontal scroll); the full column name is still on hover via title=.
+/* Short header labels keep all the columns of a roster board fitting in one
+   view (no horizontal scroll); the full column name is still on hover via
+   title=.
 
    Module-level rather than local to renderDashboardTable because the
    out-of-order warning on the grading form names steps from this same map — so
@@ -3410,14 +3611,274 @@ const ROSTER_SHORT_LABELS = {
   'Day 2 - Ops/District Manager Training': 'D2 Training',
   'Team On-Site Day Completed': 'TOSD',
   'Certified - Team On-Site Days': 'TOSD Cert',
-  'Certified - Training Days': 'Training Cert'
+  'Certified - Training Days': 'Training Cert',
+  // The recruiting path (added 2026-08-14). One column per recruiting session
+  // type, named the same way as the two above so they read as one family in the
+  // Roster sheet.
+  'Certified - Conversion Calls': 'Conversion Call',
+  'Certified - Stage 1 Interviews': 'Stage 1',
+  'Certified - Reference Checks': 'References',
+  'Certified - Parent Reference Checks': 'Parent Refs',
+  'Certified - Stage 2 Interviews': 'Stage 2'
 };
 
-function renderDashboardTable() {
-  const region = document.getElementById('filter-region').value;
-  const role = document.getElementById('filter-role').value;
-  const search = document.getElementById('filter-search').value.trim().toLowerCase();
-  const filtered = rosterRows.filter(r =>
+/* ---------------- The recruiting certification path (added 2026-08-14) -------
+   Jordan's ask: a second dashboard, shaped like the first, tracking where each
+   manager stands on the recruiting side — and only for Regional Managers and
+   upwards, "because Field Managers do not Recruit".
+
+   Decisions worth not re-litigating:
+
+   - **One column per recruiting SESSION TYPE, in process order.** The tab order
+     of this app is the real hiring order (see SESSION_TABS), and these follow
+     it: the conversion call, then stage 1, then references, then stage 2.
+     Reference checks get TWO columns because a candidate reference check and a
+     parent reference check are two different session types with two different
+     rubrics — the same reason they need two sessionType strings in Code.gs,
+     even though they share one tab.
+   - **These are HUMAN-ticked only, and are deliberately NOT in
+     SESSION_CERT_COLUMN.** That map is what lets a passing manual grade write a
+     certification onto the Roster, and what raises the un-certify offer after a
+     delete. Four of these five session types have no rubric loaded at all, and
+     the fifth (Conversion Call) has been graded against one real call in its
+     life — so certifying off a score is authority this side of the app hasn't
+     earned yet. Wiring Conversion Call in is a small change if it's ever
+     wanted; it should be a decision, not a side effect of adding a column.
+   - **Who appears is decided by EXCLUDING field managers, not by listing the
+     senior roles.** An include-list would silently drop a role nobody has
+     invented yet — a new senior title would vanish from this board with nothing
+     saying so, and a certification you can't see is one you can't record. The
+     exclusion errs the other way: a new junior role would appear here wrongly,
+     which is visible and one word to fix. Somebody with no Role on the Roster
+     appears for the same reason — a blank cell isn't proof they're a field
+     manager. Matched lower-cased, whitespace-collapsed, as a substring, so
+     "Field Manager", "field manager " and "Senior Field Manager" all land
+     together — the same matching isGraderRole uses, for the same reason (roles
+     are typed into a Sheet by hand).
+   - **If the Roster hasn't got these columns, the board says so and offers to
+     add them.** The Also Covers column made Jordan add a header by hand, which
+     was one column; five is five chances to typo a header the app then can't
+     find. addRecruitingColumnsToRoster appends the missing ones and reads them
+     back — additive only, never inserted, so nothing already in the sheet
+     moves. */
+const RECRUITING_CERT_COLUMNS = [
+  'Certified - Conversion Calls',
+  'Certified - Stage 1 Interviews',
+  'Certified - Reference Checks',
+  'Certified - Parent Reference Checks',
+  'Certified - Stage 2 Interviews'
+];
+
+// The session types whose recordings belong on the recruiting board, so an
+// expanded row there shows recruiting calls rather than the person's Training
+// Days. Matches the sessionType strings the grading form sends.
+const RECRUITING_SESSION_TYPES = [
+  'Conversion Call', 'Stage 1 Interview', 'Reference Check',
+  'Parent Reference Check', 'Stage 2 Interview'
+];
+
+const NON_RECRUITING_ROLE_KEYWORDS = ['field manager'];
+
+function isRecruitingRole(role) {
+  const r = (role || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return !NON_RECRUITING_ROLE_KEYWORDS.some(k => r.includes(k));
+}
+
+// Which of the five the Roster sheet actually has a header for.
+function recruitingColumnsPresent() {
+  return RECRUITING_CERT_COLUMNS.filter(c => rosterHeaders.includes(c));
+}
+function recruitingColumnsMissing() {
+  return RECRUITING_CERT_COLUMNS.filter(c => !rosterHeaders.includes(c));
+}
+
+/* ---------------- The two roster boards ----------------
+   Both dashboards are the same table drawn from the same rosterRows; what
+   differs is which people are in it, which status columns it shows, and which
+   elements it paints into. Everything below takes one of these rather than
+   reading fixed element IDs, so the Training/TOSD board and the Recruiting
+   board can't drift apart in look or behaviour.
+
+   `statusColumns` is [column, kind] pairs — 'flag' for a one-click training
+   step, 'cert' for a sign-off that arms and takes a second click. */
+const ROSTER_BOARDS = {
+  dashboard: {
+    key: 'dashboard',
+    label: 'Training/TOSD',
+    ids: {
+      section: 'tab-dashboard', wrap: 'dashboard-table-wrap',
+      stats: 'dashboard-stats', scope: 'dashboard-stats-scope',
+      region: 'filter-region', role: 'filter-role', search: 'filter-search',
+      editError: 'dashboard-edit-error', editStatus: 'dashboard-edit-status'
+    },
+    statusColumns: [
+      ['Day 1 - Meeting Attended', 'flag'],
+      ['Day 1 - Training Watched', 'flag'],
+      ['Day 2 - Ops/District Manager Training', 'flag'],
+      ['Team On-Site Day Completed', 'flag'],
+      ['Certified - Team On-Site Days', 'cert'],
+      ['Certified - Training Days', 'cert']
+    ],
+    // The whole Roster. This is the board that lists everybody, which is also
+    // why Add person lives on it.
+    includes: () => true,
+    // Every session type — this board is the one place a person's whole history
+    // is visible.
+    sessionTypes: null,
+    // Which certification columns the stat strip counts. Fixed here because both
+    // have existed since the Roster did.
+    statCertColumns: () => [
+      ['Certified — Training Days', 'Certified - Training Days'],
+      ['Certified — Team On-Site Days', 'Certified - Team On-Site Days']
+    ],
+    peopleLabel: 'Managers'
+  },
+  recruiting: {
+    key: 'recruiting',
+    label: 'Recruiting Dashboard',
+    ids: {
+      section: 'tab-recruiting', wrap: 'recruiting-table-wrap',
+      stats: 'recruiting-stats', scope: 'recruiting-stats-scope',
+      region: 'rc-filter-region', role: 'rc-filter-role', search: 'rc-filter-search',
+      editError: 'recruiting-edit-error', editStatus: 'recruiting-edit-status'
+    },
+    statusColumns: RECRUITING_CERT_COLUMNS.map(c => [c, 'cert']),
+    includes: (person) => isRecruitingRole(person['Role']),
+    sessionTypes: RECRUITING_SESSION_TYPES,
+    // Only the columns the Roster actually has — a card counting a column that
+    // doesn't exist would read "0 of 12 certified" when the truth is "nowhere to
+    // record it yet", which the notice above the table already says properly.
+    statCertColumns: () => recruitingColumnsPresent().map(c => [ROSTER_SHORT_LABELS[c] || c, c]),
+    peopleLabel: 'Managers who recruit'
+  }
+};
+
+// The people this board answers for, before its own filters are applied.
+function boardRoster(board) { return rosterRows.filter(board.includes); }
+
+function boardEl(board, which) { return document.getElementById(board.ids[which]); }
+
+// Draw both boards. Used wherever the roster itself has changed, as opposed to
+// one board's filters moving.
+function renderAllDashboards() {
+  Object.values(ROSTER_BOARDS).forEach(renderDashboardTable);
+}
+
+// Each board's filters drive only its own table.
+Object.values(ROSTER_BOARDS).forEach(board => {
+  ['region', 'role'].forEach(which => {
+    const el = boardEl(board, which);
+    if (el) el.addEventListener('change', () => renderDashboardTable(board));
+  });
+  const search = boardEl(board, 'search');
+  if (search) search.addEventListener('input', () => renderDashboardTable(board));
+});
+
+/* ---------------- The recruiting columns the Roster may not have yet --------
+   Every badge on the Recruiting board writes into a column looked up by header
+   name, so until those headers exist the whole board is un-clickable "Not yet"
+   badges with nothing saying why. This bar says exactly which headers are
+   missing and offers to add them.
+
+   Why the app offers to write them, when the Also Covers column was left as a
+   manual step: that was one header, and this is five, each of which the app
+   then has to find by exact text — five chances to typo a column into
+   existence that nothing can use. The write is APPEND-ONLY, to the right of
+   the last header in use, so nothing already in the sheet moves and no
+   existing data can land under the wrong heading. Same permission as every
+   other Roster write in this app: a person clicked it. */
+let recruitingColumnsBusy = false;
+
+function renderRecruitingColumnsNotice() {
+  const host = document.getElementById('recruiting-columns-notice');
+  if (!host) return;
+  const missing = recruitingColumnsMissing();
+  if (!rosterHeaders.length || !missing.length) { host.innerHTML = ''; return; }
+  const all = missing.length === RECRUITING_CERT_COLUMNS.length;
+  host.innerHTML =
+    `<div class="alert-bar">` +
+      `<div class="alert-bar-icon">${alertIcon()}</div>` +
+      `<div class="alert-bar-body">` +
+        `<div class="alert-bar-title">The Roster hasn't got ` +
+          (all ? 'these columns yet' : `${missing.length} of these columns yet`) + `</div>` +
+        `<div>Until they exist there is nowhere to record a recruiting certification, so ` +
+          `${all ? 'every badge below is' : 'the missing ones are'} showing "Not yet" and can't be clicked. ` +
+          `Adding them puts these headers on the Roster sheet, to the right of what's already there — ` +
+          `nothing else in the sheet moves.</div>` +
+        `<ul class="alert-bar-list">` +
+          missing.map(c => `<li>${escapeHtml(c)}</li>`).join('') +
+        `</ul>` +
+        // Short deliberately: .alert-bar .btn is white-space:nowrap (which the
+        // two-button bars need), and a longer label pushed the page into
+        // horizontal scroll at 375px. The headers are listed directly above, so
+        // "them" is unambiguous on screen; the aria-label carries the long form.
+        `<div class="notice-actions">` +
+          `<button type="button" class="btn" id="add-recruiting-cols-btn"` +
+            ` aria-label="Add the missing recruiting certification columns to the Roster sheet">` +
+            `Add ${missing.length === 1 ? 'it' : 'them'} to the Roster</button>` +
+        `</div>` +
+        `<div class="alert-bar-text notice-err" id="recruiting-columns-error"></div>` +
+      `</div>` +
+    `</div>`;
+  const btn = document.getElementById('add-recruiting-cols-btn');
+  if (btn) btn.addEventListener('click', () => addRecruitingColumnsToRoster(btn));
+}
+
+// Append the missing headers, read them back, then reload the roster. Read back
+// for the same reason writeRosterCell does: a write that quietly doesn't stick
+// would leave the board looking fixed and still writing nowhere.
+async function addRecruitingColumnsToRoster(btn) {
+  if (recruitingColumnsBusy) return;
+  const missing = recruitingColumnsMissing();
+  if (!missing.length) return;
+  const errEl = document.getElementById('recruiting-columns-error');
+  const fail = (msg) => { if (errEl) errEl.textContent = msg; };
+  fail('');
+
+  // The last header actually in use — not rosterHeaders.length, which can carry
+  // trailing blanks and would leave an empty column in the middle.
+  let start = 0;
+  rosterHeaders.forEach((h, i) => { if (h) start = i + 1; });
+  const end = start + missing.length - 1;
+  // The roster is read as A1:Z1000, so a column past Z would be written and then
+  // never seen again. Refuse rather than write somewhere invisible.
+  if (end > 25) {
+    fail('There is no room left on the Roster before column Z, which is as far as this app reads. Add the columns in the sheet by hand.');
+    return;
+  }
+
+  recruitingColumnsBusy = true;
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = 'Adding…';
+  try {
+    if (!(await ensureFreshToken())) throw new Error('your Google sign-in has expired. Sign in again and retry.');
+    const range = `${columnLetter(start)}1:${columnLetter(end)}1`;
+    await sheetsBatchUpdate(ROSTER_SHEET_ID, [{ range, values: [missing] }]);
+    const check = await sheetsGet(ROSTER_SHEET_ID, range);
+    const written = (check[0] || []).map(v => (v || '').trim());
+    const stuck = missing.every((c, i) => written[i] === c);
+    if (!stuck) {
+      // Deliberately does NOT claim nothing was written — something may well have
+      // landed, and a confident "nothing happened" is how a column gets added twice.
+      throw new Error(`the headers didn't read back as expected. Check row 1 of the Roster sheet from column ${columnLetter(start)} before trying again.`);
+    }
+    await loadRoster();
+    showRosterEditStatus(`Added ${missing.length} column${missing.length === 1 ? '' : 's'} to the Roster. Click a badge to certify someone.`, ROSTER_BOARDS.recruiting);
+  } catch (e) {
+    fail(`Couldn't add the columns — ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = label;
+  } finally {
+    recruitingColumnsBusy = false;
+  }
+}
+
+function renderDashboardTable(board) {
+  const region = boardEl(board, 'region').value;
+  const role = boardEl(board, 'role').value;
+  const search = boardEl(board, 'search').value.trim().toLowerCase();
+  const filtered = boardRoster(board).filter(r =>
     personInRegion(r, region) &&
     (!role || r['Role'] === role) &&
     (!search || (r['Name'] || '').toLowerCase().includes(search))
@@ -3425,29 +3886,36 @@ function renderDashboardTable() {
   // The strip follows the region and role dropdowns (it reads them itself, so
   // it can't disagree with the table) but deliberately ignores the search box —
   // "12 of 30 certified" must not change because someone typed a name.
-  renderDashboardStats();
-  const wrap = document.getElementById('dashboard-table-wrap');
+  renderDashboardStats(board);
+  // The notice about missing Roster columns is drawn with the table it's about,
+  // so a Refresh that adds the columns takes it away.
+  renderRecruitingColumnsNotice();
+  const wrap = boardEl(board, 'wrap');
   if (!filtered.length) { wrap.innerHTML = '<div class="empty-state">No matching people.</div>'; return; }
 
-  const flagCols = ['Day 1 - Meeting Attended','Day 1 - Training Watched','Day 2 - Ops/District Manager Training','Team On-Site Day Completed'];
-  const certCols = ['Certified - Team On-Site Days','Certified - Training Days'];
+  const statusCols = board.statusColumns;
   const shortLabels = ROSTER_SHORT_LABELS;
 
+  // The four fixed columns take 36%; the status columns split what's left
+  // evenly, however many of them this board has. Computed rather than written
+  // out, so a board with five columns and a board with six both fit one view.
+  const statusWidth = (64 / statusCols.length).toFixed(2);
   let html = '<table>';
   html += '<colgroup><col style="width:3%"><col style="width:14%"><col style="width:10%"><col style="width:9%">'
-    + '<col style="width:10.5%"><col style="width:10.5%"><col style="width:10.5%"><col style="width:10.5%">'
-    + '<col style="width:11%"><col style="width:11%"></colgroup>';
+    + statusCols.map(() => `<col style="width:${statusWidth}%">`).join('')
+    + '</colgroup>';
   html += '<thead><tr>';
   html += '<th></th><th>Name</th><th>Role</th><th>Region</th>';
-  flagCols.forEach(c => html += `<th title="${escapeHtml(c)}">${escapeHtml(shortLabels[c])}</th>`);
-  certCols.forEach(c => html += `<th title="${escapeHtml(c.replace('Certified - ',''))}">${escapeHtml(shortLabels[c])}</th>`);
+  statusCols.forEach(([c]) => html += `<th title="${escapeHtml(c.replace('Certified - ', 'Certified for '))}">${escapeHtml(shortLabels[c] || c)}</th>`);
   html += '</tr></thead><tbody>';
 
   filtered.forEach((r, i) => {
     // The count only appears once the Grading Log has been read (it comes in a
     // moment after the roster does) — a row with no badge is still clickable,
-    // and says so when it opens.
-    const count = submissionsCache ? submissionsForPerson(r['Name']).length : 0;
+    // and says so when it opens. Scoped to the session types this board is
+    // about, so the Recruiting board counts recruiting calls rather than the
+    // person's Training Days.
+    const count = submissionsCache ? submissionsForPerson(r['Name'], board.sessionTypes).length : 0;
     const countBadge = count
       ? ` <span class="roster-count" title="${count} graded session${count === 1 ? '' : 's'} for this person. Click the row to see them.">${count} session${count === 1 ? '' : 's'}</span>`
       : '';
@@ -3467,11 +3935,12 @@ function renderDashboardTable() {
         : '') +
       `</td>`;
     // Each status is also the control that sets it — see rosterToggleCell.
-    flagCols.forEach(c => html += `<td>${rosterToggleCell(r, c, 'flag')}</td>`);
-    certCols.forEach(c => html += `<td>${rosterToggleCell(r, c, 'cert')}</td>`);
+    statusCols.forEach(([c, kind]) => html += `<td>${rosterToggleCell(r, c, kind, board)}</td>`);
     html += '</tr>';
-    html += `<tr class="roster-detail-row hidden" data-row-index="${i}"><td colspan="10">` +
-      `<div class="person-sessions" id="roster-sessions-${i}"></div></td></tr>`;
+    // The detail row's id carries the board key: both boards are in the DOM at
+    // once, so "roster-sessions-3" alone would be two elements.
+    html += `<tr class="roster-detail-row hidden" data-row-index="${i}"><td colspan="${4 + statusCols.length}">` +
+      `<div class="person-sessions" id="roster-sessions-${board.key}-${i}"></div></td></tr>`;
   });
   html += '</tbody></table>';
   wrap.innerHTML = html;
@@ -3497,22 +3966,27 @@ function renderDashboardTable() {
         detailRow.classList.remove('hidden');
         if (!rendered) {
           rendered = true;
-          renderPersonSessions(r['Name'], document.getElementById(`roster-sessions-${i}`));
+          renderPersonSessions(r['Name'], document.getElementById(`roster-sessions-${board.key}-${i}`), board);
         }
       }
     });
   });
 }
 
-// Every session logged against this person, newest first, across all session
-// types. Matched on the name in column B of the Grading Log — the same name the
-// upload form picked out of this roster, so they line up unless someone typed
-// into the sheet by hand.
-function submissionsForPerson(name) {
+// Every session logged against this person, newest first. Matched on the name
+// in column B of the Grading Log — the same name the upload form picked out of
+// this roster, so they line up unless someone typed into the sheet by hand.
+//
+// `types` narrows it to one board's session types; leave it out for all of them.
+// A row whose Session Type is blank predates the multi-type tabs and is treated
+// as a Training Day, the same default fetchSubmissions and the result card use.
+function submissionsForPerson(name, types) {
   const key = (name || '').trim().toLowerCase();
   if (!key || !submissionsCache) return [];
+  const wanted = types ? new Set(types.map(t => t.toLowerCase())) : null;
   return submissionsCache
     .filter(s => (s.trainee || '').trim().toLowerCase() === key)
+    .filter(s => !wanted || wanted.has(((s.type || 'Training Day').trim()).toLowerCase()))
     .sort((a, b) => b.order - a.order);
 }
 
@@ -3520,8 +3994,9 @@ function submissionsForPerson(name) {
 // exact same AI result card (audio player and evidence timestamps included)
 // that Recent Submissions and Follow-Ups show, so there's one place that knows
 // what a graded session looks like.
-async function renderPersonSessions(name, container) {
+async function renderPersonSessions(name, container, board) {
   if (!container) return;
+  const types = board && board.sessionTypes;
   if (!submissionsCache) {
     container.innerHTML = '<div class="empty-state">Loading sessions…</div>';
     try {
@@ -3532,9 +4007,12 @@ async function renderPersonSessions(name, container) {
     }
   }
 
-  const sessions = submissionsForPerson(name);
+  const sessions = submissionsForPerson(name, types);
   if (!sessions.length) {
-    container.innerHTML = `<div class="empty-state">No sessions submitted for ${escapeHtml(name)} yet.</div>`;
+    // Says which kind of session is missing, so an empty row on the Recruiting
+    // board doesn't read as "this person has never been graded on anything".
+    const what = types ? 'recruiting sessions' : 'sessions';
+    container.innerHTML = `<div class="empty-state">No ${what} submitted for ${escapeHtml(name)} yet.</div>`;
     return;
   }
 
@@ -3580,8 +4058,11 @@ async function renderPersonSessions(name, container) {
       // Note and AI card share one collapsible wrapper, so opening the card
       // reveals both — the note can't be the thing that's left behind.
       (canExpand
+        // The board key is in the id because the same person can be expanded on
+        // both boards at once, and two elements sharing an id is one card
+        // rendering into the other board's row.
         ? `<div class="ps-detail hidden">` + noteHtml +
-            `<div class="ai-result-box" id="ps-detail-${escapeHtml(String(i))}-${escapeHtml(cssSafeKey(name))}"></div>` +
+            `<div class="ai-result-box" id="ps-detail-${escapeHtml(cssSafeKey(board ? board.key : 'x'))}-${escapeHtml(String(i))}-${escapeHtml(cssSafeKey(name))}"></div>` +
           `</div>`
         : '') +
     `</div>`;
@@ -3625,15 +4106,20 @@ function cssSafeKey(s) { return (s || '').toString().replace(/[^A-Za-z0-9_-]/g, 
 // paint a moment after the roster itself, once that read lands.
 function refreshRosterRecordingCounts() {
   if (!rosterRows.length || !submissionsCache) return;
-  // Never yank an open row shut under someone who's reading it.
-  if (document.querySelector('#dashboard-table-wrap .roster-row.open')) return;
-  // And never repaint a badge mid-write, or throw away a certification somebody
-  // has already armed and is about to confirm.
+  // Never repaint a badge mid-write, or throw away a certification somebody has
+  // already armed and is about to confirm. Applies to both boards at once,
+  // because either one could be the board being edited.
   if (rosterEditInProgress()) return;
-  renderDashboardTable();
+  Object.values(ROSTER_BOARDS).forEach(board => {
+    // Never yank an open row shut under someone who's reading it. Checked per
+    // board, so a row open on one doesn't freeze the counts on the other.
+    const wrap = boardEl(board, 'wrap');
+    if (wrap && wrap.querySelector('.roster-row.open')) return;
+    renderDashboardTable(board);
+  });
 }
 
-// A repaint the Dashboard can't skip. The guard above deliberately refuses to
+// A repaint the boards can't skip. The guard above deliberately refuses to
 // re-render while a row is open, so a background refresh can't shut a row under
 // someone reading it — but a delete is the opposite case: the open row is
 // showing a session that no longer exists, and leaving it there is worse than
@@ -3642,17 +4128,19 @@ function refreshRosterRecordingCounts() {
 // against the filters that were in effect when the row was drawn.
 function renderDashboardKeepingOpenRow() {
   if (!rosterRows.length) return;
-  const wrap = document.getElementById('dashboard-table-wrap');
-  if (!wrap) return;
-  const openRow = wrap.querySelector('.roster-row.open');
-  const openName = openRow ? openRow.getAttribute('data-person') : '';
-  renderDashboardTable();
-  if (!openName) return;
-  const again = [...wrap.querySelectorAll('tr.roster-row')]
-    .find(el => el.getAttribute('data-person') === openName);
-  // Click rather than setting the class directly, so the row opens through the
-  // same handler that renders the person's sessions.
-  if (again) again.click();
+  Object.values(ROSTER_BOARDS).forEach(board => {
+    const wrap = boardEl(board, 'wrap');
+    if (!wrap) return;
+    const openRow = wrap.querySelector('.roster-row.open');
+    const openName = openRow ? openRow.getAttribute('data-person') : '';
+    renderDashboardTable(board);
+    if (!openName) return;
+    const again = [...wrap.querySelectorAll('tr.roster-row')]
+      .find(el => el.getAttribute('data-person') === openName);
+    // Click rather than setting the class directly, so the row opens through the
+    // same handler that renders the person's sessions.
+    if (again) again.click();
+  });
 }
 
 function flagBadge(val) {
@@ -3751,10 +4239,10 @@ function allRosterRegions() {
    role dropdowns narrow all four figures, and the roster card splits its total
    by role so "how many field managers are there, and how many are certified"
    is one glance rather than a count down the table. */
-function renderDashboardStats() {
-  const el = document.getElementById('dashboard-stats');
+function renderDashboardStats(board) {
+  const el = boardEl(board, 'stats');
   if (!el) return;
-  const scopeEl = document.getElementById('dashboard-stats-scope');
+  const scopeEl = boardEl(board, 'scope');
   const clear = () => { el.innerHTML = ''; if (scopeEl) scopeEl.innerHTML = ''; };
   if (!rosterRows.length) { clear(); return; }
 
@@ -3767,24 +4255,27 @@ function renderDashboardStats() {
      Read straight off the dropdowns rather than passed in, because
      updateFollowUpCount calls this as well and two readings of the same filters
      could drift apart. */
-  const region = document.getElementById('filter-region').value;
-  const role = document.getElementById('filter-role').value;
+  const region = boardEl(board, 'region').value;
+  const role = boardEl(board, 'role').value;
   // The same region test the table uses (personInRegion), so a district manager
   // who covers BC1 is counted in the BC1 slice exactly when their row is shown
   // in it. One consequence worth knowing: somebody covering three regions is
   // counted once in each of the three, so these figures can't be added up
   // across regions without counting them more than once.
-  const inScope = rosterRows.filter(r =>
+  const inScope = boardRoster(board).filter(r =>
     personInRegion(r, region) && (!role || r['Role'] === role)
   );
 
   const yes = (r, col) => (r[col] || '').trim().toLowerCase() === 'yes';
   const total = inScope.length;
   // Nobody matches this combination. The table below already says so in words —
-  // four cards reading "0 of 0" would only say it worse.
+  // cards reading "0 of 0" would only say it worse.
   if (!total) { clear(); return; }
-  const trainingCert = inScope.filter(r => yes(r, 'Certified - Training Days')).length;
-  const onsiteCert = inScope.filter(r => yes(r, 'Certified - Team On-Site Days')).length;
+  // One card per certification this board tracks, counted the same way whichever
+  // board it is.
+  const certCards = board.statCertColumns().map(([label, column]) => ({
+    label, count: inScope.filter(r => yes(r, column)).length
+  }));
 
   /* How the roster splits by role, straight off the Roster's own Role column —
      so a role nobody has used yet appears here the day somebody is given it,
@@ -3811,13 +4302,20 @@ function renderDashboardStats() {
      the person it's about (item.region is already looked up that way). Someone
      whose name isn't on the Roster has neither, so they drop out of a narrowed
      count rather than being counted against a region they aren't in. */
+  const wantedTypes = board.sessionTypes ? new Set(board.sessionTypes.map(t => t.toLowerCase())) : null;
   const openFollowUps = followUpItems.filter(i => {
     if (isAddressed(i)) return false;
+    // A board only counts the sessions it's about, so the Recruiting card can't
+    // report a Training Day that needs a conversation.
+    if (wantedTypes && !wantedTypes.has((i.type || 'Training Day').trim().toLowerCase())) return false;
     if (region && i.region !== region) return false;
     if (role) {
       const person = rosterPerson(i.person);
       if (!person || (person['Role'] || '').trim() !== role) return false;
     }
+    // Someone this board doesn't list can't have a row on it either.
+    const person = rosterPerson(i.person);
+    if (person && !board.includes(person)) return false;
     return true;
   }).length;
 
@@ -3844,9 +4342,11 @@ function renderDashboardStats() {
       (bar === undefined ? '' : `<div class="stat-card-bar"><span style="width:${bar}%"></span></div>`) +
     `</div>`;
 
-  // What the four figures cover. Named above them because two of them are now
-  // narrowable, and a number whose scope isn't stated is a number waiting to be
-  // misread.
+  // What the figures cover. Named above them because two of the filters narrow
+  // them, and a number whose scope isn't stated is a number waiting to be
+  // misread. The Recruiting board says who it leaves out as part of that — a
+  // roster total that doesn't match the one on the other tab has to explain
+  // itself where it's read, not only in the note further up.
   if (scopeEl) {
     const regionsInScope = new Set(inScope.map(r => (r['Region'] || '').trim()).filter(Boolean)).size;
     const people = `${total} ${total === 1 ? 'person' : 'people'}`;
@@ -3854,37 +4354,31 @@ function renderDashboardStats() {
     const across = region ? '' : ` across ${regionsInScope} region${regionsInScope === 1 ? '' : 's'}`;
     const chips = [region, role].filter(Boolean)
       .map(c => `<span class="stat-scope-chip">${escapeHtml(c)}</span>`).join(' + ');
+    const whole = board.key === 'recruiting'
+      ? 'Counting everyone who recruits'
+      : 'Counting the whole roster';
     scopeEl.innerHTML = chips
       ? `Counting ${chips} — ${people}${across}. Searching a name doesn't change these figures.`
-      : `Counting the whole roster — ${people}${across}.`;
+      : `${whole} — ${people}${across}.`;
   }
 
   el.innerHTML = [
     card({
-      label: 'Managers',
+      label: board.peopleLabel,
       value: total,
       sub: '<div class="stat-roles">' + roleRows.map(([name, n]) =>
         `<span class="stat-role-n">${n}</span><span class="stat-role-label">${escapeHtml(name)}</span>`
       ).join('') + '</div>'
-    }),
-    card({
-      label: 'Certified — Training Days',
-      value: trainingCert,
-      of: `of ${total}`,
-      sub: `${total - trainingCert} still to certify` +
-        `<div class="stat-card-pct">${pctLabel(trainingCert)} certified</div>`,
-      bar: pct(trainingCert),
-      cls: trainingCert === total ? 'is-good' : ''
-    }),
-    card({
-      label: 'Certified — Team On-Site Days',
-      value: onsiteCert,
-      of: `of ${total}`,
-      sub: `${total - onsiteCert} still to certify` +
-        `<div class="stat-card-pct">${pctLabel(onsiteCert)} certified</div>`,
-      bar: pct(onsiteCert),
-      cls: onsiteCert === total ? 'is-good' : ''
-    }),
+    })
+  ].concat(certCards.map(({ label, count }) => card({
+    label: label.indexOf('Certified') === 0 ? label : `Certified — ${label}`,
+    value: count,
+    of: `of ${total}`,
+    sub: `${total - count} still to certify` +
+      `<div class="stat-card-pct">${pctLabel(count)} certified</div>`,
+    bar: pct(count),
+    cls: count === total ? 'is-good' : ''
+  }))).concat([
     card({
       label: 'Sessions awaiting follow-up',
       value: openFollowUps,
@@ -3893,7 +4387,7 @@ function renderDashboardStats() {
         : 'Nothing outstanding',
       cls: openFollowUps ? 'is-alert' : ''
     })
-  ].join('');
+  ]).join('');
 }
 
 // No title= on either badge: on the Dashboard both are wrapped in the button
@@ -3939,7 +4433,7 @@ function certBadge(val) {
 let rosterEditBusy = false;
 let armedRosterToggle = null;
 let rosterEditStatusTimer = null;
-function rosterEditInProgress() { return rosterEditBusy || addPersonBusy || !!armedRosterToggle; }
+function rosterEditInProgress() { return rosterEditBusy || addPersonBusy || recruitingColumnsBusy || !!armedRosterToggle; }
 
 function isYesValue(val) { return (val || '').toString().trim().toLowerCase() === 'yes'; }
 
@@ -3966,16 +4460,18 @@ function rosterToggleAction(name, column, kind, on) {
     : `Mark "${what}" as Done for ${who}.`;
 }
 
-function rosterToggleCell(person, column, kind) {
+function rosterToggleCell(person, column, kind, board) {
   const value = person[column];
   const badge = kind === 'cert' ? certBadge(value) : flagBadge(value);
   // A column the Roster doesn't actually have has nowhere to write to, so it
-  // stays a plain badge rather than offering a button that could only fail.
+  // stays a plain badge rather than offering a button that could only fail. On
+  // the Recruiting board that's the whole column until the headers are added,
+  // which is what renderRecruitingColumnsNotice explains above the table.
   if (!rosterHeaders.includes(column)) return badge;
   const name = person['Name'] || '';
   const label = escapeHtml(rosterToggleAction(name, column, kind, isYesValue(value)));
   return `<button type="button" class="badge-toggle" data-person="${escapeHtml(name)}"` +
-    ` data-column="${escapeHtml(column)}" data-kind="${kind}"` +
+    ` data-column="${escapeHtml(column)}" data-kind="${kind}" data-board="${escapeHtml(board.key)}"` +
     ` title="${label}" aria-label="${label}">${badge}</button>`;
 }
 
@@ -4042,8 +4538,8 @@ function rosterEditConfirmation(name, column, kind, turnedOn) {
     : `Saved — "${what}" is now Pending for ${name}.`;
 }
 
-function showRosterEditStatus(message) {
-  const el = document.getElementById('dashboard-edit-status');
+function showRosterEditStatus(message, board) {
+  const el = boardEl(board || ROSTER_BOARDS.dashboard, 'editStatus');
   if (!el) return;
   clearTimeout(rosterEditStatusTimer);
   el.textContent = message || '';
@@ -4055,8 +4551,8 @@ function showRosterEditStatus(message) {
 // most of a roster below the top of the table. Plain scroll, no
 // behavior:'smooth' — smooth scrolling is a silent no-op in some browsers, and
 // a notice whose whole job is to not be missed must not ride on it.
-function showRosterEditError(message, title) {
-  const host = document.getElementById('dashboard-edit-error');
+function showRosterEditError(message, title, board) {
+  const host = boardEl(board || ROSTER_BOARDS.dashboard, 'editError');
   if (!host) return;
   if (!message) { host.innerHTML = ''; return; }
   host.innerHTML =
@@ -4084,6 +4580,9 @@ function wireRosterToggles(wrap) {
       const name = btn.getAttribute('data-person');
       const column = btn.getAttribute('data-column');
       const kind = btn.getAttribute('data-kind');
+      // Which board this badge is on, so a failure is reported above the table
+      // it happened on rather than on the tab next door.
+      const board = ROSTER_BOARDS[btn.getAttribute('data-board')] || ROSTER_BOARDS.dashboard;
       const turningOn = !isYesValue(rosterValueFor(btn));
       const what = rosterColumnPhrase(column);
 
@@ -4106,15 +4605,17 @@ function wireRosterToggles(wrap) {
       rosterEditBusy = true;
       btn.disabled = true;
       btn.innerHTML = `<span class="badge saving">${dashIcon()}Saving…</span>`;
-      showRosterEditError('');
-      showRosterEditStatus('');
+      showRosterEditError('', '', board);
+      showRosterEditStatus('', board);
       try {
         await writeRosterCell(name, column, value);
         paintRosterToggle(btn, value);
-        showRosterEditStatus(rosterEditConfirmation(name, column, kind, turningOn));
+        showRosterEditStatus(rosterEditConfirmation(name, column, kind, turningOn), board);
         // Everything else on screen that reads this value. Deliberately not a
-        // renderDashboardTable() — that would shut an expanded row.
-        renderDashboardStats();
+        // renderDashboardTable() — that would shut an expanded row. Both strips
+        // are repainted because either could count this column, and the badge
+        // itself only ever exists on one board.
+        Object.values(ROSTER_BOARDS).forEach(renderDashboardStats);
         populateTraineeDropdown();
         renderPrereqGate();
         renderCertPreview();
@@ -4122,7 +4623,7 @@ function wireRosterToggles(wrap) {
         // Nothing was changed, so the badge goes back to what the Roster still
         // says rather than to the value that failed to save.
         paintRosterToggle(btn, rosterValueFor(btn));
-        showRosterEditError(`Couldn't change "${what}" for ${name} — ${e.message}`);
+        showRosterEditError(`Couldn't change "${what}" for ${name} — ${e.message}`, '', board);
       } finally {
         btn.disabled = false;
         rosterEditBusy = false;
@@ -5197,11 +5698,16 @@ const PRICE_CACHED_IN_PER_MTOK = 0.15;
 const AUDIO_TOKENS_PER_SECOND = 25;
 const GRADING_PASS_COUNT = 3;
 const GRADING_OUTPUT_TOKENS = 3500;   // one grading pass's JSON, measured off live rows
-// A training day is not wall-to-wall talking. ~150 words/minute of actual
-// speech, ~1.33 tokens/word, and roughly two-thirds of the clock carrying
-// speech at all, gives ~2.2 tokens of transcript per second of recording.
-// A guess, and the estimate is labelled as one.
-const TRANSCRIPT_TOKENS_PER_SECOND = 2.2;
+// MEASURED 2026-08-14, and it was the biggest single error in the sizing. This
+// was a reasoned guess of 2.2 (150 words/min, 1.33 tokens/word, two-thirds of
+// the clock carrying speech). A real 10-minute window of the Matt recording
+// produced 4,583 tokens — 7.6 per second of recording, THREE AND A HALF TIMES
+// the guess. That is most of why a 46-minute pass, budgeted as 6,000 tokens,
+// was really 21,000 and ran nine and a half minutes into a six-minute wall.
+//
+// Speaker labels, timestamps every turn and the delivery notes are what make it
+// dense — this format costs far more than plain speech-to-text would.
+const TRANSCRIPT_TOKENS_PER_SECOND = 7.6;
 
 /* ---- How long a recording can be, and how it gets broken up (V17) --------
 
@@ -5262,12 +5768,17 @@ const TRANSCRIPT_WINDOW_MAX_TOKENS = 60000;
    All three numbers below are measured or bounded by that run. They are still
    the least certain thing here, which is why a pass that runs hot shrinks the
    rest — see TRANSCRIBE_SLOW_PASS_SECONDS. */
-// 59s to read the 4h33m file ≈ 13s per hour of recording. Paid by EVERY window,
-// because Gemini cannot bill part of a file.
+// 59s to read the 4h33m file cold ≈ 13s per hour of recording. Paid by EVERY
+// window, because Gemini cannot bill part of a file — though at 99% cache hit
+// rates the repeat reads come back far faster than the first.
 const TRANSCRIPT_READ_SECONDS_PER_HOUR = 13;
-// Bounded above by the failed run (<48/s) and set below it deliberately: too
-// low costs an extra pass, too high costs a dead session and a wasted read.
-const TRANSCRIPT_WRITE_TOKENS_PER_SECOND = 35;
+// MEASURED 2026-08-14: 4,583 tokens of transcript in 126 seconds = 36/second,
+// with thinking left on. That is the rate this is sized against, because it is
+// the one actually observed working. Thinking is now switched off, which should
+// make it substantially faster — but sizing against a hoped-for speedup is the
+// mistake that has already cost two failed runs, so the improvement gets banked
+// only once it has been seen.
+const TRANSCRIPT_WRITE_TOKENS_PER_SECOND = 36;
 // Wall-clock allowed for one pass against Google's hard 360s, leaving two
 // minutes of headroom for a slow day.
 const TRANSCRIBE_PASS_BUDGET_SECONDS = 240;
@@ -5956,7 +6467,14 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
             toSeconds,            // V17; a V16 backend ignores it and runs open-ended
             totalSeconds: audioSeconds,   // lets the backend refuse a recording past the hard ceiling
             traineeName,
-            regionalManagerName   // so the transcript can label who is who
+            regionalManagerName,  // so the transcript can label who is who
+            // V18.1. The transcription prompt branches on this: a Conversion
+            // Call is a recruiting phone call and its speakers are CALLER and
+            // CANDIDATE, not TRAINER and OPERATOR. Without it the backend
+            // defaults to the field-training wording and labels a job applicant
+            // as "the Site Operator being trained" — nobody on the call. A
+            // V16/V17 backend simply ignores the extra field.
+            sessionType
           });
 
           // A V15 backend has never heard of this action, reads it as a grade
@@ -6150,9 +6668,17 @@ const CLIP_PREROLL_SECONDS = 3;
 // "14:22" -> 862, "1:02:33" -> 3753. null for anything that isn't a real
 // timestamp, so a malformed clip is dropped rather than rendered as a jump
 // point that would land somewhere arbitrary.
+/* V18.1: strips surrounding square brackets. See the long note on the matching
+   copy in Code.gs — a transcript marker is written "[0:01:22]" and the prompt
+   tells the model to copy it exactly, so this anchored regex was dropping every
+   clip on the transcript route. This copy matters as much as the backend's: it
+   is what rebuilds sections for a session re-opened from the Grading Log, so
+   without it an already-written row would still show no jump points even after
+   the backend is fixed. Keep the two identical. */
 function parseClipSeconds(text) {
   if (!text) return null;
-  const match = String(text).trim().match(/^(?:(\d{1,2}):)?(\d{1,3}):(\d{2})$/);
+  const match = String(text).trim().replace(/^\[+/, '').replace(/\]+$/, '').trim()
+    .match(/^(?:(\d{1,2}):)?(\d{1,3}):(\d{2})$/);
   if (!match) return null;
   const hours = match[1] ? parseInt(match[1], 10) : 0;
   const minutes = parseInt(match[2], 10);
@@ -6873,7 +7399,14 @@ function renderAiGradingResult(result, container, audioFileId, transcriptLink) {
           <button type="button" class="btn secondary ai-audio-load">Load recording</button>
           <span class="ai-audio-hint">${anyClips
             ? 'Or just click a timestamp below — it loads the audio and jumps straight there.'
-            : 'This session was graded before evidence timestamps existed, so there are no jump points — but you can still listen here.'}</span>
+            // V18.1: this used to assert "graded before evidence timestamps
+            // existed", which is a cause the page cannot actually know. It was
+            // written when the only sessions without clips were old ones — and
+            // it then confidently mis-explained a brand-new transcript-graded
+            // session whose clips had been dropped by the bracket bug in
+            // parseClipSeconds. A wrong reason is worse than no reason: it sent
+            // the reader looking at the session's age instead of at a live bug.
+            : 'No jump points on this one — the AI didn&rsquo;t return any timestamps for it. You can still listen from the start.'}</span>
         </div>
         <div class="ai-audio-slot"></div>
         <div class="ai-audio-nudge hidden">
@@ -8169,9 +8702,10 @@ function updateFollowUpCount() {
   const open = followUpItems.filter(i => !isAddressed(i)).length;
   badge.textContent = String(open);
   badge.classList.toggle('hidden', open === 0);
-  // The Dashboard strip carries the same figure. Follow-Ups loads a moment
-  // after the roster, so this is what fills that card in once it arrives.
-  renderDashboardStats();
+  // Both dashboard strips carry the same figure, each scoped to its own session
+  // types. Follow-Ups loads a moment after the roster, so this is what fills
+  // that card in once it arrives.
+  Object.values(ROSTER_BOARDS).forEach(renderDashboardStats);
 }
 
 function renderFollowUps() {
@@ -8367,6 +8901,20 @@ async function setFollowUpState(item, addressed, note) {
 });
 document.getElementById('fu-filter-search').addEventListener('input', renderFollowUps);
 document.getElementById('fu-refresh-btn').addEventListener('click', loadFollowUps);
+
+/* ---- Catch-up: sign-in init if Google's script got here first -----------
+   The <script> in <head> that loads Google's client calls onGsiLoad() from its
+   own onload attribute, which was fine for as long as fetching that script over
+   the network took longer than parsing this page. Once it is CACHED it can land
+   first, and then onGsiLoad simply doesn't exist yet — the call throws, onload
+   never fires again, and nothing ever initialises the token client. The app
+   shows the sign-in screen with a permanently disabled button, which looks
+   exactly like the missing-OAuth-origin failure this project has hit before.
+
+   Observed for real in a test browser on a repeat visit, so the race is not
+   theoretical. onGsiLoad() is idempotent, so whichever route wins, the other is
+   a no-op. */
+if (window.google && google.accounts && google.accounts.oauth2) onGsiLoad();
 </script>
 </body>
 </html>
