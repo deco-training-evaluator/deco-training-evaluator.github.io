@@ -5142,7 +5142,12 @@ const PRICE_OUT_PER_MTOK = 9.00;
 // because Code.gs sends the audio BEFORE the prompt, so repeated windows share
 // a matching prefix. Never assumed in the headline figure.
 const PRICE_CACHED_IN_PER_MTOK = 0.15;
-const AUDIO_TOKENS_PER_SECOND = 32;
+// MEASURED, not the documented figure (2026-08-14). Google's docs say 32
+// tokens per second of audio and countTokens agrees — it predicted 526,773 for
+// the 4h33m recording. What the model ACTUALLY billed was 409,541, which is
+// 25.0/second. usageMetadata is what gets charged, so 25 is the honest number
+// and every cost on the form was 22% too high before this.
+const AUDIO_TOKENS_PER_SECOND = 25;
 const GRADING_PASS_COUNT = 3;
 const GRADING_OUTPUT_TOKENS = 3500;   // one grading pass's JSON, measured off live rows
 // A training day is not wall-to-wall talking. ~150 words/minute of actual
@@ -5185,10 +5190,40 @@ const TRANSCRIPT_TOKENS_PER_SECOND = 2.2;
    IF A WINDOW EVER OVERRUNS 6 MINUTES, THIS IS THE NUMBER TO TURN DOWN. How
    fast the model writes is a guess until a real long session has run. */
 const MAX_GRADABLE_SECONDS = Math.floor((1048576 - 8000) / 32);
-const TRANSCRIPT_WINDOW_TARGET_TOKENS = 30000;
 // Never let a single window's output approach the 65,536 ceiling even if the
-// target above is edited upward carelessly.
+// figures below are edited carelessly.
 const TRANSCRIPT_WINDOW_MAX_TOKENS = 60000;
+
+/* ---- Window size, from MEASUREMENT (2026-08-14) ---------------------------
+
+   The first real 4h33m run failed, and it is worth keeping why. The window was
+   sized off an assumption that the model writes ~200 tokens a second. Pass 1
+   was asked for 2h16m — about 18,000 tokens of transcript — and it did not
+   finish inside the wall. So the real write rate is well under 48/second, not
+   200. That one wrong number was the whole failure.
+
+   The probe then split the two possible causes apart: reading the 4h33m file
+   took 59 SECONDS and returned 200. Reading is cheap; WRITING is the wall.
+   That is what makes smaller windows the correct fix rather than a waste — if
+   reading had been the slow part, every window would pay it again and no
+   amount of splitting would have helped.
+
+   So a window is now sized from a time budget instead of a token count:
+
+       one pass = (budget − time to read the file) × how fast it writes
+
+   All three numbers below are measured or bounded by that run. They are still
+   the least certain thing here, which is why a pass that runs hot shrinks the
+   rest — see TRANSCRIBE_SLOW_PASS_SECONDS. */
+// 59s to read the 4h33m file ≈ 13s per hour of recording. Paid by EVERY window,
+// because Gemini cannot bill part of a file.
+const TRANSCRIPT_READ_SECONDS_PER_HOUR = 13;
+// Bounded above by the failed run (<48/s) and set below it deliberately: too
+// low costs an extra pass, too high costs a dead session and a wasted read.
+const TRANSCRIPT_WRITE_TOKENS_PER_SECOND = 35;
+// Wall-clock allowed for one pass against Google's hard 360s, leaving two
+// minutes of headroom for a slow day.
+const TRANSCRIBE_PASS_BUDGET_SECONDS = 240;
 
 // Two caps, because a stuck transcription is the one loop in this app that
 // spends real money per iteration: every pass re-reads the whole recording, so
@@ -5196,7 +5231,10 @@ const TRANSCRIPT_WINDOW_MAX_TOKENS = 60000;
 // not. The per-window cap is the tight one and gives the useful error ("this
 // part of the recording keeps stopping short"); the total is the backstop.
 const TRANSCRIPT_MAX_ATTEMPTS_PER_WINDOW = 3;   // the first go plus two resumes
-const MAX_TRANSCRIBE_CALLS = 12;
+// Raised from 12 once the measured write rate pushed the pass count up: a real
+// 8-hour session now plans for around 14 passes, and the backstop must not be
+// the thing that stops a job the form already quoted a price for.
+const MAX_TRANSCRIBE_CALLS = 22;
 
 /* ---- Staying inside the 6-minute wall, by measuring rather than guessing ----
 
@@ -5221,7 +5259,7 @@ const MAX_TRANSCRIBE_CALLS = 12;
 // fires. Deliberately NOT tighter: every shrink means more passes and every
 // pass re-reads the whole recording, so over-reacting to a pass that was
 // comfortably fine is itself expensive.
-const TRANSCRIBE_SLOW_PASS_SECONDS = 270;
+const TRANSCRIBE_SLOW_PASS_SECONDS = 285;
 // What the remaining span is multiplied by when that happens. 0.55 roughly
 // halves it, so two hot passes in a row bring it down to about a third.
 const TRANSCRIBE_SHRINK_FACTOR = 0.55;
@@ -5232,11 +5270,18 @@ const TRANSCRIBE_MIN_WINDOW_SECONDS = 20 * 60;
 // How many windows a recording of this length needs. Always at least 1, and
 // always few enough that no window can breach the output ceiling.
 function transcriptWindowCount(seconds) {
-  const total = Math.max(0, seconds || 0) * TRANSCRIPT_TOKENS_PER_SECOND;
+  const length = Math.max(0, seconds || 0);
+  const total = length * TRANSCRIPT_TOKENS_PER_SECOND;
   if (!(total > 0)) return 1;
-  const byTarget = Math.ceil(total / TRANSCRIPT_WINDOW_TARGET_TOKENS);
+  // Reading is paid once per window and scales with the WHOLE file, so a longer
+  // recording leaves less of each pass's budget for writing — which is why the
+  // pass count climbs faster than length alone would suggest.
+  const readSeconds = (length / 3600) * TRANSCRIPT_READ_SECONDS_PER_HOUR;
+  const writeBudget = Math.max(30, TRANSCRIBE_PASS_BUDGET_SECONDS - readSeconds);
+  const tokensPerPass = Math.max(2000, writeBudget * TRANSCRIPT_WRITE_TOKENS_PER_SECOND);
+  const byBudget = Math.ceil(total / tokensPerPass);
   const byCeiling = Math.ceil(total / TRANSCRIPT_WINDOW_MAX_TOKENS);
-  return Math.max(1, byTarget, byCeiling);
+  return Math.max(1, byBudget, byCeiling);
 }
 
 // The window boundaries themselves, split EVENLY rather than "3h47m, 3h47m,
@@ -5892,6 +5937,16 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
           // betting the session on one guess about how fast the model writes.
           // Only meaningful when the length is known; with no duration there is
           // one open-ended pass and nothing left to resize.
+          // Straight to the console so the first real long run answers the
+          // caching question — which decides whether an 8-hour session costs
+          // about $3 or about $16 — instead of it staying a hopeful maybe.
+          if (written.promptTokens) {
+            console.info(`Transcription pass ${windowsDone + 1}: ${Math.round(Number(written.elapsedMs || 0) / 1000)}s, `
+              + `${written.promptTokens.toLocaleString()} prompt tokens, `
+              + `${Number(written.cachedTokens || 0).toLocaleString()} of them cached `
+              + `(${Math.round((Number(written.cachedTokens || 0) / written.promptTokens) * 100)}%).`);
+          }
+
           const passSeconds = Number(written.elapsedMs || 0) / 1000;
           if (knownLength && passSeconds > TRANSCRIBE_SLOW_PASS_SECONDS) {
             const shrunk = Math.max(TRANSCRIBE_MIN_WINDOW_SECONDS, Math.floor(windowSpan * TRANSCRIBE_SHRINK_FACTOR));
