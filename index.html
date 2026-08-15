@@ -5494,11 +5494,19 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
     // it (and the tab's count) either way — the manager shouldn't have to
     // remember to reload to find out something needs attention.
     loadFollowUps();
+    // Recent Submissions was last read at SUBMIT time, before the AI row
+    // existed, so it still describes the session as awaiting an AI grade. Left
+    // alone on this path, a finished result card sits directly above a list
+    // calling that same session "AI grade still pending" — which reads as the
+    // grade having failed at the exact moment it succeeded. Re-read on BOTH
+    // paths: the card and the list must never disagree about one session.
+    // Safe to do here — it repaints #recent-log-wrap, a different element from
+    // the results card rendered below, so it cannot disturb what just landed.
+    loadRecentLog();
 
     if (!onOwnTab()) {
-      // Landed while a different session type was on screen — put it where the
-      // person will actually find it rather than dropping it into this panel.
-      loadRecentLog();
+      // Landed while a different session type was on screen — the refresh above
+      // is what puts it where the person will actually find it.
       return result;
     }
 
