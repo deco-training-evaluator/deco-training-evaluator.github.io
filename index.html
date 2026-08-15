@@ -703,6 +703,20 @@
     margin-top: 3px;
     letter-spacing: 0.01em;
   }
+  /* "1 of 3 passes", under a Not-yet certification badge on a session type that
+     takes more than one passing recording. Sized and coloured like
+     .region-also, and --text-secondary rather than --text-muted for the same
+     measured reason: muted is around 3.2:1 at this size and fails AA. */
+  .cert-stack { display: inline-flex; flex-direction: column; align-items: flex-start; }
+  .cert-progress {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-top: 3px;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+  }
   .add-person-new { margin-top: 8px; }
   .add-person-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
   /* Same reasoning as .alert-bar-title: full-strength --critical on a tinted or
@@ -2255,6 +2269,10 @@
         <strong>Certification rule:</strong> once someone has attended the Day 1 meeting/training and watched a
         team on-site day, they can go on team visits without being certified — but they can't run a training
         session themselves until they're certified on training days.
+        <br><strong>Team on-site days take three:</strong> a full team on-site day is three to four separate site
+        visits, so each visit is recorded and graded on its own. It takes <strong>three passing recordings</strong>
+        to certify someone — a fail doesn&rsquo;t wipe out the passes already banked, it just means one more visit
+        to record. Training days are still one session, one grade.
         <br><strong>Changing a status:</strong> click any badge in the table to change it — it writes straight
         back to the Roster sheet. The four training steps flip on one click; the two certification columns ask
         you to click again to confirm.
@@ -4393,11 +4411,58 @@ function renderDashboardStats(board) {
 // No title= on either badge: on the Dashboard both are wrapped in the button
 // that changes them (rosterToggleCell), and an inner tooltip would shadow the
 // one that says what clicking actually does.
-function certBadge(val) {
+function certBadge(val, progress) {
   const isYes = isYesValue(val);
-  return isYes
+  const badge = isYes
     ? `<span class="badge good">${checkIcon()}Certified</span>`
     : `<span class="badge critical">${xIcon()}Not yet</span>`;
+  if (!progress) return badge;
+  /* Wrapped rather than appended. On the Dashboard this lands inside
+     .badge-toggle, which is an inline-flex ROW — so a bare block-level line
+     becomes a second flex item and sits BESIDE the badge, 149px wide in a 121px
+     column, spilling over the next column instead of stacking. (table-layout is
+     fixed, so nothing widens and nothing scrolls; it just quietly overlaps.)
+     One flex item that stacks internally is what makes it sit under the badge
+     in the button and everywhere else alike. */
+  return `<span class="cert-stack">${badge}<span class="cert-progress">${escapeHtml(progress)}</span></span>`;
+}
+
+/* Which session type a certification column belongs to — SESSION_CERT_COLUMN
+   read the other way round, so the badge can find the rule that governs it. */
+function sessionTypeForCertColumn(column) {
+  return Object.keys(SESSION_CERT_COLUMN).find(t => SESSION_CERT_COLUMN[t] === column) || '';
+}
+
+/* "1 of 3 passes" under a Not-yet badge, on a session type that takes more than
+   one passing recording. This is the only place the rule is visible without
+   filling a form in, so it's worth the line.
+
+   Empty in four cases, all the same principle: nothing to add on a session type
+   that needs one pass, nothing to say about somebody already certified, nothing
+   honest to say before the Grading Log has been read (a zero drawn while that
+   read is in flight would tell somebody with three passes they have none), and
+   — the judgement call — nothing worth a line at zero passes. On a real roster
+   most people have no team on-site grades on file at all, so "0 of 3" would add
+   a second line to nearly every row to repeat what the Not-yet badge beside it
+   already says. Same rule the "N sessions" badge in this table follows: it
+   appears when there's something to report. The Dashboard note above the table
+   is where the rule itself is stated, and the button's tooltip carries it too.
+
+   refreshRosterRecordingCounts() repaints the table when the Grading Log read
+   lands, which is what fills these in a moment after the roster appears. */
+/* `value` is passed in rather than read off the person because paintRosterToggle
+   is deliberately called with values that DON'T match memory — the new value
+   while a write is landing, and the old one when a write fails and the badge has
+   to go back. Reading person[column] here made the badge say "Certified" with
+   "3 of 3 passes" still under it for as long as the two disagreed. */
+function certProgressLabel(person, column, value) {
+  if (isYesValue(value === undefined ? person[column] : value)) return '';
+  const sessionType = sessionTypeForCertColumn(column);
+  const required = passesRequired(sessionType);
+  if (!sessionType || required === 1) return '';
+  const onFile = passingManualGrades(person['Name'], sessionType);
+  if (!onFile) return '';
+  return `${onFile} of ${required} passes`;
 }
 
 /* ---------------- Changing a roster status from the Dashboard ----------------
@@ -4451,9 +4516,15 @@ function rosterToggleAction(name, column, kind, on) {
   const what = rosterColumnPhrase(column);
   const who = name || 'this person';
   if (kind === 'cert') {
-    return on
-      ? `Remove ${who}'s ${what} certification (asks you to confirm).`
-      : `Certify ${who} for ${what} (asks you to confirm).`;
+    if (on) return `Remove ${who}'s ${what} certification (asks you to confirm).`;
+    // A session type that takes several passing recordings says so here. The
+    // button still certifies on the spot — this is a human deciding, which
+    // outranks the count — but it shouldn't look like the count doesn't exist.
+    const required = passesRequired(sessionTypeForCertColumn(column));
+    return `Certify ${who} for ${what} (asks you to confirm).` +
+      (required > 1
+        ? ` Normally earned by ${plural(required, 'passing recording')}; this certifies them straight away.`
+        : '');
   }
   return on
     ? `Mark "${what}" as Pending for ${who}.`
@@ -4462,7 +4533,7 @@ function rosterToggleAction(name, column, kind, on) {
 
 function rosterToggleCell(person, column, kind, board) {
   const value = person[column];
-  const badge = kind === 'cert' ? certBadge(value) : flagBadge(value);
+  const badge = kind === 'cert' ? certBadge(value, certProgressLabel(person, column)) : flagBadge(value);
   // A column the Roster doesn't actually have has nowhere to write to, so it
   // stays a plain badge rather than offering a button that could only fail. On
   // the Recruiting board that's the whole column until the headers are added,
@@ -4484,8 +4555,12 @@ function rosterValueFor(btn) {
 
 function paintRosterToggle(btn, value) {
   const kind = btn.getAttribute('data-kind');
-  const label = rosterToggleAction(btn.getAttribute('data-person'), btn.getAttribute('data-column'), kind, isYesValue(value));
-  btn.innerHTML = kind === 'cert' ? certBadge(value) : flagBadge(value);
+  const column = btn.getAttribute('data-column');
+  const person = rosterPerson(btn.getAttribute('data-person'));
+  const label = rosterToggleAction(btn.getAttribute('data-person'), column, kind, isYesValue(value));
+  btn.innerHTML = kind === 'cert'
+    ? certBadge(value, person ? certProgressLabel(person, column, value) : '')
+    : flagBadge(value);
   btn.title = label;
   btn.setAttribute('aria-label', label);
 }
@@ -5060,7 +5135,14 @@ populateGraderDropdown();
 
    This only ever writes "Yes". A grade under the bar leaves the cell alone: a
    weak session doesn't revoke a certification somebody already holds, and
-   that's a call for a manager, not for a form. */
+   that's a call for a manager, not for a form.
+
+   Since 2026-08-14 a passing grade is not automatically a certification: some
+   session types need several of them (SESSION_PASSES_REQUIRED — a Team On-Site
+   Day needs three). So the two questions are kept apart everywhere below —
+   manualGradePasses answers "is this recording a pass?", and the count of
+   passes on file answers "does that certify them?". Collapsing the two back
+   into one test is how a single good visit starts signing people off again. */
 
 /* The grader's written note, typed into "Manual feedback" on the grading form
    and written to column F of the manual row at submit time.
@@ -5092,8 +5174,11 @@ const TRANSCRIPT_LINK_IDX = 23;                    // X
 // a session that no longer exists.
 const GRADING_LOG_LAST_COLUMN = 'X';
 
-// Both halves of the Smartsheet formula, or nothing.
-function manualGradeCertifies(sessionType, rawGrade, everySectionPassed) {
+// Is this ONE recording a pass? Both halves of the Smartsheet formula, or
+// nothing. Deliberately not named *Certifies any more: on a session type that
+// needs three passing recordings this being true says nothing about whether
+// anybody gets certified — see SESSION_PASSES_REQUIRED.
+function manualGradePasses(sessionType, rawGrade, everySectionPassed) {
   if (!everySectionPassed) return false;
   // No published pass mark, or nowhere on the Roster to record it (the four
   // preview session types have neither) — never auto-certify on a guess.
@@ -5178,6 +5263,35 @@ function submissionPassedManually(sub) {
   return ((sub && sub.sectionsAllPass) || '').trim().toLowerCase() !== 'no';
 }
 
+/* How many passing manual grades this person has on file for this session type
+   — the count SESSION_PASSES_REQUIRED is measured against.
+
+   Manual grades only, and that is the whole point: an AI grade still never
+   moves the Roster, so "three passes" means three a human signed off, not three
+   the AI liked. Counting AI verdicts here would quietly hand the certification
+   decision to the AI, which is Phase 5 and is not this.
+
+   Returns null, NOT 0, when the Grading Log hasn't been read yet. "Nobody has
+   passed one" and "we haven't looked" are different facts, and a preview that
+   renders them as the same sentence would confidently tell somebody they're on
+   their first pass when they're on their third. Every caller has to decide what
+   to do with the unknown rather than being handed a number to trust. */
+function passingManualGrades(name, sessionType) {
+  if (!submissionsCache) return null;
+  if (!(name || '').trim()) return null;
+  return submissionsForPerson(name, [sessionType]).filter(submissionPassedManually).length;
+}
+
+// "1st" / "2nd" / "3rd". Small enough to inline, but it appears in four places
+// and an off-by-one in the suffix reads as sloppiness on the one line that
+// tells somebody they've been signed off.
+function ordinal(n) {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
+}
+function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
+
 // Says what pressing Submit will do to the Dashboard, while the score is still
 // on screen and editable. The "below the bar" case is spelled out too — it
 // answers "why didn't it certify?" before it gets asked.
@@ -5199,6 +5313,11 @@ function renderCertPreview() {
   if (!Number.isFinite(total) || total < 0 || total > max) return hide();
 
   const who = name ? escapeHtml(name) : 'this person';
+  const required = passesRequired(sessionType);
+  // null when there's no name yet or the log hasn't loaded — see
+  // passingManualGrades. The branches below have to handle that, not paper over
+  // it with a zero.
+  const onFile = required === 1 ? null : passingManualGrades(name, sessionType);
   let html;
   let willCertify = false;
   if (total < threshold) {
@@ -5206,11 +5325,32 @@ function renderCertPreview() {
   } else if (isAlreadyCertified(name, sessionType)) {
     html = `${who} is already certified for ${sessionType} — the Dashboard won't change.`;
   } else if (!ticked) {
-    html = `${total}/${max} clears the ${threshold} bar. Certifying also needs every section at 6 or better — ` +
-      `<strong>tick the box above</strong> to mark ${who} certified for ${sessionType}.`;
-  } else {
+    // On a multi-recording session type the tick doesn't certify on its own, so
+    // it mustn't be described as though it does — it's what makes this
+    // recording count as one of the passes.
+    html = `${total}/${max} clears the ${threshold} bar. ` +
+      (required === 1
+        ? `Certifying also needs every section at 6 or better — <strong>tick the box above</strong> to mark ${who} certified for ${sessionType}.`
+        : `Counting it as a pass also needs every section at 6 or better — <strong>tick the box above</strong>.`);
+  } else if (required === 1) {
     willCertify = true;
     html = `${checkIcon()} <strong>Submitting will mark ${who} as certified for ${sessionType}</strong> on the Dashboard.`;
+  } else if (onFile === null) {
+    /* No name picked yet, or the Grading Log hasn't been read. Say what the
+       rule is without claiming a position in it — a preview that guesses "their
+       1st of 3" at somebody sitting on their third pass is worse than one that
+       doesn't count. */
+    html = `${total}/${max} is a pass. ${sessionType} certification takes ` +
+      `<strong>${plural(required, 'passing recording')}</strong> — the Dashboard updates once the ${ordinal(required)} is in.`;
+  } else if (onFile + 1 >= required) {
+    willCertify = true;
+    html = `${checkIcon()} <strong>Submitting will mark ${who} as certified for ${sessionType}</strong> on the Dashboard — ` +
+      `it's their ${ordinal(onFile + 1)} passing recording.`;
+  } else {
+    const left = required - onFile - 1;
+    html = `${total}/${max} is a pass — ${who}'s <strong>${ordinal(onFile + 1)} of ${required}</strong>. ` +
+      `The Dashboard won't change yet; ` +
+      (left === 1 ? 'one more passing recording certifies them.' : `${left} more passing recordings certify them.`);
   }
   el.innerHTML = html;
   el.classList.toggle('will-certify', willCertify);
@@ -5540,15 +5680,63 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     // exactly what to go tick by hand rather than implying the whole thing
     // failed.
     let certNote = '';
-    if (manualGradeCertifies(sessionType, rawGradeVal, everySectionPassed)) {
-      statusEl.textContent = 'Updating the Dashboard…';
-      try {
-        certNote = ' ' + await certifyOnRoster(traineeName, sessionType);
-        await loadRoster();
-      } catch (certErr) {
-        console.error(certErr);
-        certNote = ` The grade saved, but the Dashboard couldn't be updated (${certErr.message}) — ` +
-          `mark ${traineeName} certified on the Roster by hand.`;
+    if (manualGradePasses(sessionType, rawGradeVal, everySectionPassed)) {
+      const required = passesRequired(sessionType);
+      // Certifying writes to the Roster; that's a second, separate write to a
+      // different Sheet, so it's kept out of the try/catch above: if it fails
+      // the submission still stands, and the message says exactly what to go
+      // tick by hand rather than implying the whole thing failed.
+      const doCertify = async () => {
+        statusEl.textContent = 'Updating the Dashboard…';
+        try {
+          certNote = ' ' + await certifyOnRoster(traineeName, sessionType);
+          await loadRoster();
+        } catch (certErr) {
+          console.error(certErr);
+          certNote = ` The grade saved, but the Dashboard couldn't be updated (${certErr.message}) — ` +
+            `mark ${traineeName} certified on the Roster by hand.`;
+        }
+      };
+
+      if (required === 1) {
+        await doCertify();
+      } else if (isAlreadyCertified(traineeName, sessionType)) {
+        // Nothing to count and nothing to write. Said out loud anyway, because
+        // silence after a passing grade reads as something having gone wrong.
+        certNote = ` ${traineeName} is already certified for ${sessionType}, so the Dashboard is unchanged.`;
+      } else {
+        /* The count has to come from a FRESH read, not from submissionsCache.
+           The row for this very grade was appended seconds ago and isn't in the
+           cache, and the cache may be minutes stale besides — someone else may
+           have logged a visit. This is the highest-stakes write in the app; an
+           extra read of the Grading Log is a cheap price for not signing
+           somebody off on a number that was out of date. */
+        statusEl.textContent = 'Checking how many passing recordings are on file…';
+        let passCount = null;
+        let countErr = null;
+        try {
+          await fetchSubmissions();
+          passCount = passingManualGrades(traineeName, sessionType);
+        } catch (e) {
+          console.error(e);
+          countErr = e;
+        }
+        if (passCount === null) {
+          // Can't count, so don't certify — the safe direction, and it says so
+          // rather than leaving somebody to wonder why the badge didn't move.
+          // No "the grade saved, but…" here — the status line this is appended
+          // to has already said so, in both the with-audio and no-audio wording.
+          certNote = ` The Grading Log couldn't be re-read` +
+            (countErr ? ` (${countErr.message})` : '') +
+            `, so the Dashboard was left alone. ${sessionType} certification needs ` +
+            `${plural(required, 'passing recording')} — press Refresh and check where ${traineeName} stands.`;
+        } else if (passCount >= required) {
+          await doCertify();
+        } else {
+          const left = required - passCount;
+          certNote = ` That's ${passCount} of ${required} passing ${sessionType} recordings for ${traineeName} — ` +
+            (left === 1 ? 'one more certifies them.' : `${left} more certify them.`);
+        }
       }
     }
 
@@ -7811,7 +7999,7 @@ function restoreUncertifyOffer() {
     return;
   }
   if (document.getElementById('log-cert-notice')) return;
-  showUncertifyOffer(pendingUncertify.name, pendingUncertify.sessionType, false);
+  showUncertifyOffer(pendingUncertify.name, pendingUncertify.sessionType, false, pendingUncertify.onFile);
 }
 
 function offerUncertifyAfterDelete(sub) {
@@ -7821,24 +8009,33 @@ function offerUncertifyAfterDelete(sub) {
   if (!name || !SESSION_CERT_COLUMN[type]) return;
   if (!isAlreadyCertified(name, type)) return;   // nothing to take back
   if (!submissionPassedManually(sub)) return;    // this grade can't have been what certified them
-  // Any grade still in the log that would certify them on its own leaves the
-  // Roster exactly where it is. submissionsCache has already had the deleted
-  // session dropped out of it by the time this runs.
-  const stillSupported = submissionsForPerson(name)
-    .some(s => (s.type || 'Training Day') === type && submissionPassedManually(s));
-  if (stillSupported) return;
+  /* Enough passing grades still in the log to hold the certification up on
+     their own? Then the Roster stays exactly where it is. submissionsCache has
+     already had the deleted session dropped out of it by the time this runs.
+
+     Counted against SESSION_PASSES_REQUIRED rather than "is there any passing
+     grade left": on a Team On-Site Day, going from three passes to two is
+     precisely the case that should raise the offer, and a .some() test would
+     have said "still supported" and stayed quiet. */
+  const required = passesRequired(type);
+  const stillOnFile = submissionsForPerson(name)
+    .filter(s => (s.type || 'Training Day') === type && submissionPassedManually(s)).length;
+  if (stillOnFile >= required) return;
   // The Roster's spelling, not whatever was on the row — names are matched
   // case-insensitively, and this bar is about a specific person on the
   // Dashboard, so it should read the way that Dashboard row reads.
   const person = rosterPerson(name);
-  showUncertifyOffer((person && person['Name']) || name, type);
+  showUncertifyOffer((person && person['Name']) || name, type, true, stillOnFile);
 }
 
-function showUncertifyOffer(name, sessionType, announce = true) {
+function showUncertifyOffer(name, sessionType, announce = true, onFile = 0) {
   const wrap = document.getElementById('recent-log-wrap');
   if (!wrap) return;
   // Remembered outside the DOM so a re-render can put it back (restoreUncertifyOffer).
-  pendingUncertify = { name, sessionType };
+  // onFile rides along so a re-render redraws the same sentence. Recomputing it
+  // here would read a cache that has moved on since the delete, and the bar
+  // would start quoting a different number than the one it opened with.
+  pendingUncertify = { name, sessionType, onFile };
 
   const bar = document.createElement('div');
   bar.id = 'log-cert-notice';
@@ -7864,8 +8061,12 @@ function showUncertifyOffer(name, sessionType, announce = true) {
 
   const text = document.createElement('div');
   text.className = 'alert-bar-text';
+  const required = passesRequired(sessionType);
   text.innerHTML = `<strong>${escapeHtml(name)}</strong> is still marked certified for ` +
-    `${escapeHtml(sessionType)} on the Dashboard, and that was the last passing grade on file. ` +
+    `${escapeHtml(sessionType)} on the Dashboard, and ` +
+    (required > 1
+      ? `that leaves only ${onFile} of the ${required} passing recordings it takes to certify. `
+      : `that was the last passing grade on file. `) +
     `Deleting a grade doesn't change the Dashboard on its own — the tick lives on the Roster. ` +
     `If the certification came from that grade, set it back here; if it was signed off some other ` +
     `way, leave it alone.`;
@@ -8247,6 +8448,35 @@ async function loadRecentLog() {
 // all three places or this list stops matching the grade it's reporting.
 const SESSION_PASS_THRESHOLD = { 'Training Day': 85, 'Team On-Site Day': 38, 'Conversion Call': 48 };
 const SECTION_PASS_MARK = 6;
+
+/* How many passing recordings it takes to certify somebody (Jordan, 2026-08-14).
+
+   A Team On-Site Day is not one sitting — it's three to four separate site
+   visits over the course of a day. That is why the whole-day recording was
+   running four-plus hours and costing a fortune to transcribe: it was never one
+   session in the first place. Recording each visit on its own makes every file
+   short enough to grade in a single pass, and it also means one recording is a
+   thinner piece of evidence than it used to be. So the bar moved with it: THREE
+   passing recordings certify, roughly one full day's work done well.
+
+   Two things this deliberately does NOT do:
+     - It does not change the per-recording formula. Each one is still scored
+       against the same rubric — 38 of 50 with every section at 6 or better —
+       exactly as the "Site Visit Evaluations" Smartsheet has it. What is new is
+       a count on top of that, which the Smartsheet has no concept of. The
+       Dashboard will therefore certify someone LATER than the Smartsheet's own
+       formula would; that's the intended change, not a drift to fix.
+     - It does not reset on a failure. Three passes are needed, not three in a
+       row: two passes and a fail means one more recording, not starting over.
+       Jordan's call, and the forgiving reading is the right one while the AI is
+       still uncalibrated.
+
+   Training Day has no entry, so it stays at one — a Training Day IS a single
+   two-day session, and there is nothing to split. Same construction as
+   SESSION_CERT_COLUMN and SESSION_PREREQUISITES: a session type opts in by
+   appearing here, rather than every other type needing a special case. */
+const SESSION_PASSES_REQUIRED = { 'Team On-Site Day': 3 };
+function passesRequired(sessionType) { return SESSION_PASSES_REQUIRED[sessionType] || 1; }
 
 /* ========================= COMPARE TAB ====================================
    Phase 2 calibration, on screen: every AI reading of one person's session
