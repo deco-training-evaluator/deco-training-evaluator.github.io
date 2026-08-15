@@ -1843,6 +1843,74 @@
   }
   .transcript-note strong { color: color-mix(in srgb, var(--accent) 78%, var(--text-primary)); }
   .transcript-note a { color: color-mix(in srgb, var(--accent) 78%, var(--text-primary)); font-weight: 600; white-space: nowrap; }
+
+  /* ---- Compare tab ---------------------------------------------------------
+     The table grows a column per AI run, so it gets its own scroller instead of
+     pushing the page sideways — same rule every wide block in this file follows. */
+  .cmp-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+  /* width:100% alone lets the table SQUEEZE instead of scroll — measured at
+     375px it crushed 8 columns into the viewport rather than handing the
+     overflow to .cmp-scroll, which is the whole reason that container exists.
+     min-width:max-content makes it fill the panel when it fits and grow past it
+     when it doesn't, so a session with six runs scrolls sideways inside its own
+     box and stays readable at every column count. */
+  .cmp-table { width: 100%; min-width: max-content; border-collapse: collapse; }
+  .cmp-table th, .cmp-table td { padding: 9px 12px; border-bottom: 1px solid var(--gridline); text-align: left; vertical-align: top; }
+  .cmp-table tbody tr:last-child td { border-bottom: none; }
+  .cmp-table thead th {
+    background: var(--sunken); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-secondary); font-weight: 700; white-space: nowrap; vertical-align: bottom;
+  }
+  .cmp-table td { font-variant-numeric: tabular-nums; }
+  .cmp-col-head { display: flex; flex-direction: column; gap: 3px; min-width: 104px; }
+  /* --text-secondary, not --text-muted: both of these sit on a --sunken ground
+     (the sticky header, and the total row's tinted band) where muted measures
+     4.09 in light mode — under AA at 10px. Same move already made for thead th
+     and .stat-card-label for the same reason. */
+  .cmp-col-when { font-size: 10px; color: var(--text-secondary); text-transform: none; letter-spacing: 0; font-weight: 600; }
+  /* Audio vs transcript is the whole question this tab exists to answer, so the
+     medium is a labelled chip on the column, never something to infer from a date. */
+  .cmp-medium { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 9.5px; font-weight: 700;
+                letter-spacing: .05em; border: 1px solid; width: fit-content; }
+  .cmp-medium.audio      { color: color-mix(in srgb, var(--accent) 78%, var(--text-primary));
+                           background: color-mix(in srgb, var(--accent) 15%, transparent);
+                           border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .cmp-medium.transcript { color: color-mix(in srgb, var(--good) 78%, var(--text-primary));
+                           background: color-mix(in srgb, var(--good) 15%, transparent);
+                           border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+  .cmp-medium.human      { color: color-mix(in srgb, var(--text-primary) 90%, transparent);
+                           background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+                           border-color: color-mix(in srgb, var(--text-primary) 34%, transparent); }
+  .cmp-section-name { font-weight: 600; min-width: 176px; }
+  .cmp-score { font-size: 15px; font-weight: 700; }
+  /* A section with no confident score is NOT a zero on screen. It counts as 0 in
+     the total by rubric rule, but showing "0" here would read as "scored badly"
+     when it means "never came up" — the distinction this project keeps everywhere. */
+  .cmp-score.none { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+  .cmp-cell-note { display: block; font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
+  .cmp-delta { display: inline-block; margin-left: 6px; padding: 1px 5px; border-radius: 5px;
+               font-size: 10px; font-weight: 700; vertical-align: middle; }
+  .cmp-delta.match { color: color-mix(in srgb, var(--good) 78%, var(--text-primary));
+                     background: color-mix(in srgb, var(--good) 16%, transparent); }
+  .cmp-delta.near  { color: color-mix(in srgb, var(--warning) 78%, var(--text-primary));
+                     background: color-mix(in srgb, var(--warning) 18%, transparent); }
+  .cmp-delta.far   { color: color-mix(in srgb, var(--critical) 78%, var(--text-primary));
+                     background: color-mix(in srgb, var(--critical) 16%, transparent); }
+  .cmp-human-input { width: 68px; padding: 5px 7px; font-size: 14px; font-weight: 700;
+                     font-variant-numeric: tabular-nums; border: 1px solid var(--border-strong);
+                     border-radius: 7px; background: var(--sunken); color: var(--text-primary); }
+  .cmp-human-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .cmp-table tr.cmp-total-row td { border-top: 2px solid var(--border-strong); background: var(--sunken); font-weight: 700; }
+  .cmp-table tr.cmp-total-row .cmp-score { font-size: 17px; }
+  .cmp-verdict-row td { background: var(--sunken); }
+  .cmp-summary { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+  .cmp-summary-card { flex: 1 1 190px; padding: 11px 13px; border: 1px solid var(--border);
+                      border-radius: 10px; background: var(--surface-1); }
+  .cmp-summary-label { font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+                       color: var(--text-secondary); font-weight: 700; }
+  .cmp-summary-value { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 3px; }
+  .cmp-summary-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+  .cmp-storage-note { font-size: 11px; color: var(--text-secondary); margin-top: 10px; }
   /* Reviewer notes arrive as one long run-on line (Gemini's note plus the
      machine-appended flags, joined with " | "). Rendered as separate bullets
      so each thing to check is its own item instead of a paragraph. */
@@ -2079,6 +2147,7 @@
 <nav class="tabs" id="tab-nav">
   <button id="tab-dashboard-btn" class="active">Dashboard</button>
   <button id="tab-followups-btn">Follow-Ups<span id="followup-count" class="tab-count hidden">0</span></button>
+  <button id="tab-compare-btn">Compare</button>
 </nav>
 
 <main>
@@ -2207,6 +2276,34 @@
         </div>
         <div id="followups-summary" class="followup-summary"></div>
         <div id="followups-wrap"><div class="empty-state">Sign in to view.</div></div>
+      </div>
+    </section>
+
+    <!-- COMPARE TAB — Phase 2 calibration, on screen. Sits beside Follow-Ups
+         rather than inside a session tab for the same reason that one does:
+         the question is cross-session ("do these readings agree?"), not "how
+         did this one recording go". Every AI grade a person has for a session
+         type lines up side by side, section by section, against a human grade
+         typed in beside them. Deliberately handles N runs, not a fixed number,
+         because the count is whatever happens to have been graded. -->
+    <section id="tab-compare" class="hidden">
+      <span class="pill">DECO | Compare</span>
+      <div class="note">
+        <strong>Line up every reading of the same session.</strong> Pick a person and a session type and each AI
+        grade they have appears as its own column — audio and transcript runs side by side — with the human grade
+        from the Smartsheet typed in beside them. This is the Phase 2 calibration view: the point is to see
+        <em>where</em> the AI and a district manager disagree, section by section, not just whether the totals match.
+        The human column is the reference the AI is measured against, never the other way round.
+      </div>
+      <div class="panel">
+        <div class="filters">
+          <select id="cmp-person"><option value="">Select a person…</option></select>
+          <select id="cmp-type"></select>
+          <div class="filter-actions">
+            <button id="cmp-refresh-btn" class="btn secondary">Refresh</button>
+          </div>
+        </div>
+        <div id="compare-wrap"><div class="empty-state">Sign in, then pick a person to compare.</div></div>
       </div>
     </section>
 
@@ -2969,6 +3066,22 @@ function buildMockGradingForm(tab) {
 
 document.getElementById('tab-dashboard-btn').addEventListener('click', () => showTab('dashboard'));
 document.getElementById('tab-followups-btn').addEventListener('click', () => showTab('followups'));
+document.getElementById('tab-compare-btn').addEventListener('click', () => showTab('compare'));
+document.getElementById('cmp-person').addEventListener('change', renderCompare);
+document.getElementById('cmp-type').addEventListener('change', renderCompare);
+// Re-reads the Grading Log rather than clearing submissionsCache — the Dashboard
+// badges read that same cache, and blanking it mid-flight would empty them.
+document.getElementById('cmp-refresh-btn').addEventListener('click', async () => {
+  const wrap = document.getElementById('compare-wrap');
+  if (wrap) wrap.innerHTML = '<div class="empty-state">Loading…</div>';
+  try { await fetchSubmissions(); }
+  catch (err) {
+    if (wrap) wrap.innerHTML = `<div class="empty-state">Couldn't reload the grading log: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+  populateComparePickers();
+  renderCompare();
+});
 renderTabNav();
 renderPreviewTabs();
 
@@ -2979,6 +3092,7 @@ function showTab(name) {
   // Panels: dashboard, follow-ups, the one shared grading panel, and one per preview tab.
   document.getElementById('tab-dashboard').classList.toggle('hidden', name !== 'dashboard');
   document.getElementById('tab-followups').classList.toggle('hidden', name !== 'followups');
+  document.getElementById('tab-compare').classList.toggle('hidden', name !== 'compare');
   document.getElementById('tab-grading').classList.toggle('hidden', !liveTab);
   SESSION_TABS.filter(t => t.status === 'preview').forEach(t => {
     document.getElementById(`tab-${t.key}`).classList.toggle('hidden', name !== t.key);
@@ -2987,9 +3101,15 @@ function showTab(name) {
   // Nav highlight.
   document.getElementById('tab-dashboard-btn').classList.toggle('active', name === 'dashboard');
   document.getElementById('tab-followups-btn').classList.toggle('active', name === 'followups');
+  document.getElementById('tab-compare-btn').classList.toggle('active', name === 'compare');
   SESSION_TABS.forEach(t => {
     document.getElementById(`tab-${t.key}-btn`).classList.toggle('active', name === t.key);
   });
+
+  // Loaded on open rather than on sign-in: it's a view somebody goes looking
+  // for, so there's no reason to spend a Grading Log read on every session that
+  // never opens it. It reuses submissionsCache when something else filled it.
+  if (name === 'compare') loadCompare();
 
   if (!liveTab) return;
 
@@ -7058,6 +7178,298 @@ async function loadRecentLog() {
 // all three places or this list stops matching the grade it's reporting.
 const SESSION_PASS_THRESHOLD = { 'Training Day': 85, 'Team On-Site Day': 38 };
 const SECTION_PASS_MARK = 6;
+
+/* ========================= COMPARE TAB ====================================
+   Phase 2 calibration, on screen: every AI reading of one person's session
+   type lined up against each other and against the human grade.
+
+   Built for N runs, not a fixed number. The count is whatever happens to have
+   been graded — two today, five next week — and a table hardcoded to four
+   would break on the first session that isn't.
+
+   The human column is the REFERENCE, never a fourth opinion to be averaged in.
+   Phase 2 is "refine the prompt until the AI lines up with the district
+   manager", so the arithmetic here only ever measures AI against human. */
+
+// A typed-in human grade is kept in localStorage, NOT written to the Grading
+// Log. Two reasons, and the second is the real one: a Sheet column would need
+// Y (X is now the transcript link) plus a matching bump to
+// GRADING_LOG_LAST_COLUMN, and this view is explicitly speculative — Jordan
+// asked for it knowing it might not get used. Local storage costs nothing to
+// abandon. If the view earns its place, promoting these to a column is the
+// upgrade, and the note under the table says so rather than letting anyone
+// assume their colleagues can see what they typed.
+const HUMAN_GRADE_STORE_PREFIX = 'deco-human-grade:';
+
+function humanGradeKey(person, sessionType) {
+  return HUMAN_GRADE_STORE_PREFIX + person + '::' + sessionType;
+}
+// Wrapped because localStorage THROWS rather than returning null in a private
+// window or with site data blocked — the same lesson as saveToken and the theme
+// toggle. A blocked store must cost the typed numbers, never the page.
+function loadHumanGrades(person, sessionType) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(humanGradeKey(person, sessionType)) || 'null');
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  } catch (e) { return {}; }
+}
+function saveHumanGrades(person, sessionType, grades) {
+  try { localStorage.setItem(humanGradeKey(person, sessionType), JSON.stringify(grades)); return true; }
+  catch (e) { console.warn('Could not save the human grade on this browser:', e); return false; }
+}
+
+// A transcript-graded session is the one Code.gs wrote a transcript link for
+// (column X, V16). No link means the audio was graded directly — which is also
+// true of every session graded before V16 existed, and that's correct: they
+// were audio runs. audioLinkOf() gates it so a note typed into the column by
+// hand can't be read as a transcript.
+function runMedium(sub) {
+  return audioLinkOf(sub.transcriptLink) ? 'transcript' : 'audio';
+}
+
+// Oldest first, so columns read left to right in the order they were graded.
+function compareRunsFor(person, sessionType) {
+  return (submissionsCache || [])
+    .filter(s => (s.trainee || '').trim() === person && (s.type || '') === sessionType && s.aiRow)
+    .map(s => ({ sub: s, result: parseAiResultFromRow(s.aiRow) }))
+    .filter(x => x.result)
+    .sort((a, b) => a.sub.order - b.sub.order);
+}
+
+// Union across runs, preserving first-seen order, so a run that happens to be
+// missing a section doesn't drop that row for the runs that do have it.
+function compareSectionKeys(runs) {
+  const keys = [], seen = new Set();
+  runs.forEach(r => Object.keys(r.result.sections || {}).forEach(k => {
+    if (!seen.has(k)) { seen.add(k); keys.push(k); }
+  }));
+  return keys;
+}
+
+// Mirrors followUpReasons()'s test exactly, and must keep doing so. A section
+// with no confident score counts as 0 in the TOTAL by rubric rule, but it is
+// not the same thing as having scored 0, and drawing it as one would turn
+// "never came up on the recording" into "did this badly".
+function compareScoreOf(section) {
+  if (!section) return null;
+  const noScore = section.score === null || section.score === undefined ||
+    section.evidence_basis === 'insufficient_evidence' ||
+    section.evidence_basis === 'inconsistent_across_runs';
+  return noScore ? null : Number(section.score);
+}
+
+// How far this AI score sits from the human's. Signed, because "the AI is
+// consistently generous" and "the AI is consistently harsh" are different
+// findings and a bare magnitude would hide which one you're looking at.
+function compareDeltaChip(aiScore, humanRaw) {
+  if (aiScore === null || humanRaw === '' || humanRaw === undefined || humanRaw === null) return '';
+  const humanScore = Number(humanRaw);
+  if (Number.isNaN(humanScore)) return '';
+  const d = aiScore - humanScore;
+  const mag = Math.abs(d);
+  const tone = mag === 0 ? 'match' : (mag <= 2 ? 'near' : 'far');
+  const sign = d > 0 ? '+' : (d < 0 ? '−' : '±');
+  return `<span class="cmp-delta ${tone}" title="AI ${aiScore}, human ${humanScore}">${sign}${mag}</span>`;
+}
+
+// Only people who actually have something to compare. Offering the whole roster
+// would mostly offer dead ends.
+function populateComparePickers() {
+  const personSel = document.getElementById('cmp-person');
+  const typeSel = document.getElementById('cmp-type');
+  if (!personSel || !typeSel) return;
+
+  if (!typeSel.options.length) {
+    typeSel.innerHTML = LIVE_SESSION_TABS
+      .map(t => `<option value="${escapeHtml(t.sessionType)}">${escapeHtml(t.label)}</option>`).join('');
+  }
+
+  // Preserved across a re-read, like every other picker in this file — a
+  // Refresh must not silently move what you were looking at.
+  const keep = personSel.value;
+  const names = [...new Set((submissionsCache || [])
+    .filter(s => s.aiRow).map(s => (s.trainee || '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  personSel.innerHTML = '<option value="">Select a person…</option>' +
+    names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+  if (keep && names.includes(keep)) personSel.value = keep;
+}
+
+function renderCompare() {
+  const wrap = document.getElementById('compare-wrap');
+  if (!wrap) return;
+  const person = (document.getElementById('cmp-person') || {}).value || '';
+  const sessionType = (document.getElementById('cmp-type') || {}).value || '';
+
+  if (!person) {
+    wrap.innerHTML = '<div class="empty-state">Pick a person above to line up their gradings side by side.</div>';
+    return;
+  }
+
+  const runs = compareRunsFor(person, sessionType);
+  if (!runs.length) {
+    wrap.innerHTML = `<div class="empty-state">No AI grades for ${escapeHtml(person)} on ` +
+      `${escapeHtml(sessionType)} yet. Grade a recording on that tab and it will show up here.</div>`;
+    return;
+  }
+
+  const human = loadHumanGrades(person, sessionType);
+  const keys = compareSectionKeys(runs);
+  const max = SESSION_MAX_POSSIBLE[sessionType];
+  const threshold = SESSION_PASS_THRESHOLD[sessionType];
+
+  const heads = runs.map(r => {
+    const medium = runMedium(r.sub);
+    return `<th><div class="cmp-col-head">` +
+      `<span class="cmp-medium ${medium}">${medium === 'transcript' ? 'Transcript' : 'Audio'}</span>` +
+      `<span class="cmp-col-when">${escapeHtml(r.sub.when || '')}</span>` +
+      `</div></th>`;
+  }).join('');
+
+  const bodyRows = keys.map(key => {
+    const humanVal = (human[key] === undefined || human[key] === null) ? '' : human[key];
+    const cells = runs.map(r => {
+      const section = (r.result.sections || {})[key];
+      const score = compareScoreOf(section);
+      return `<td>` +
+        (score === null
+          ? `<span class="cmp-score none">never came up</span>`
+          : `<span class="cmp-score">${score}</span>${compareDeltaChip(score, humanVal)}`) +
+        (section && section.needs_human_review ? `<span class="cmp-cell-note">AI wasn't sure</span>` : '') +
+        `</td>`;
+    }).join('');
+    return `<tr><td class="cmp-section-name">${escapeHtml(sectionLabel(key))}</td>${cells}` +
+      `<td><input class="cmp-human-input" type="number" min="0" max="10" step="1" ` +
+      `data-section="${escapeHtml(key)}" value="${escapeHtml(String(humanVal))}" ` +
+      `aria-label="Human score for ${escapeHtml(sectionLabel(key))}"></td></tr>`;
+  }).join('');
+
+  const filledKeys = keys.filter(k => human[k] !== undefined && human[k] !== '' && !Number.isNaN(Number(human[k])));
+  const humanTotal = filledKeys.reduce((sum, k) => sum + Number(human[k]), 0);
+
+  const totalCells = runs.map(r => {
+    const t = r.result.total_score;
+    return `<td><span class="cmp-score">${(t === null || t === undefined) ? '—' : t}</span>` +
+      (max ? `<span class="cmp-cell-note">of ${max}</span>` : '') + `</td>`;
+  }).join('');
+
+  // The human total is the SUM of what's been typed, never a separately typed
+  // number — two sources for one figure is how they drift apart. It says how
+  // many sections are behind it so a part-filled column can't read as a grade.
+  const humanTotalCell = `<td><span class="cmp-score">${filledKeys.length ? humanTotal : '—'}</span>` +
+    `<span class="cmp-cell-note">${filledKeys.length === keys.length
+      ? (max ? `of ${max}` : 'all sections')
+      : `${filledKeys.length} of ${keys.length} filled in`}</span></td>`;
+
+  const verdictCells = runs.map(r =>
+    `<td>${r.result.certified ? escapeHtml(r.result.certified) : '—'}</td>`).join('');
+  const humanVerdict = filledKeys.length === keys.length && threshold
+    ? ((humanTotal >= threshold && filledKeys.every(k => Number(human[k]) >= SECTION_PASS_MARK)) ? 'Yes' : 'No')
+    : '—';
+
+  wrap.innerHTML =
+    compareSummary(runs, keys, human, filledKeys, humanTotal, max) +
+    `<div class="cmp-scroll"><table class="cmp-table">` +
+      `<thead><tr><th>Section</th>${heads}` +
+        `<th><div class="cmp-col-head"><span class="cmp-medium human">Human</span>` +
+        `<span class="cmp-col-when">type it in</span></div></th></tr></thead>` +
+      `<tbody>${bodyRows}` +
+        `<tr class="cmp-total-row"><td class="cmp-section-name">Total</td>${totalCells}${humanTotalCell}</tr>` +
+        `<tr class="cmp-verdict-row"><td class="cmp-section-name">Certified</td>${verdictCells}` +
+        `<td>${humanVerdict}</td></tr>` +
+      `</tbody></table></div>` +
+    `<div class="cmp-storage-note">The human column is saved <strong>on this browser only</strong> — it isn't ` +
+    `written to the Grading Log, so a colleague opening this page won't see it. Log what you learn in the ` +
+    `Phase 2 decisions Sheet, which is the shared record.</div>`;
+
+  wrap.querySelectorAll('.cmp-human-input').forEach(input => {
+    input.addEventListener('change', () => {
+      const store = loadHumanGrades(person, sessionType);
+      const val = input.value.trim();
+      if (val === '') delete store[input.dataset.section];
+      else store[input.dataset.section] = Number(val);
+      saveHumanGrades(person, sessionType, store);
+      renderCompare();   // deltas and both totals move together
+    });
+  });
+}
+
+// The figures worth having above the table. Every one of them is arithmetic on
+// what the table already shows, so the two can't disagree.
+function compareSummary(runs, keys, human, filledKeys, humanTotal, max) {
+  const cards = [];
+
+  cards.push(`<div class="cmp-summary-card"><div class="cmp-summary-label">AI runs</div>` +
+    `<div class="cmp-summary-value">${runs.length}</div>` +
+    `<div class="cmp-summary-sub">${runs.filter(r => runMedium(r.sub) === 'audio').length} audio · ` +
+    `${runs.filter(r => runMedium(r.sub) === 'transcript').length} transcript</div></div>`);
+
+  // Audio vs transcript is the question this tab was built to answer, so it gets
+  // its own card — but only when there is genuinely one of each to compare.
+  const audioRuns = runs.filter(r => runMedium(r.sub) === 'audio');
+  const scriptRuns = runs.filter(r => runMedium(r.sub) === 'transcript');
+  if (audioRuns.length && scriptRuns.length) {
+    const avg = list => {
+      const vals = list.map(r => r.result.total_score).filter(t => t !== null && t !== undefined && !Number.isNaN(Number(t)));
+      return vals.length ? vals.reduce((a, b) => a + Number(b), 0) / vals.length : null;
+    };
+    const a = avg(audioRuns), t = avg(scriptRuns);
+    if (a !== null && t !== null) {
+      const diff = t - a;
+      cards.push(`<div class="cmp-summary-card"><div class="cmp-summary-label">Transcript vs audio</div>` +
+        `<div class="cmp-summary-value">${diff > 0 ? '+' : (diff < 0 ? '−' : '±')}${Math.abs(Math.round(diff * 10) / 10)}</div>` +
+        `<div class="cmp-summary-sub">points on the total${max ? ` out of ${max}` : ''}</div></div>`);
+    }
+  }
+
+  // Widest disagreement between the AI runs themselves, which is where to look
+  // first when two readings of one session don't match.
+  let widest = null;
+  keys.forEach(key => {
+    const scores = runs.map(r => compareScoreOf((r.result.sections || {})[key])).filter(s => s !== null);
+    if (scores.length < 2) return;
+    const spread = Math.max(...scores) - Math.min(...scores);
+    if (!widest || spread > widest.spread) widest = { key, spread };
+  });
+  if (widest && widest.spread > 0) {
+    cards.push(`<div class="cmp-summary-card"><div class="cmp-summary-label">Widest AI disagreement</div>` +
+      `<div class="cmp-summary-value">${widest.spread}</div>` +
+      `<div class="cmp-summary-sub">points, on ${escapeHtml(sectionLabel(widest.key))}</div></div>`);
+  }
+
+  // Only once there's a human grade to measure against — this is the number
+  // Phase 2 is actually trying to drive down.
+  if (filledKeys.length) {
+    let sum = 0, n = 0;
+    runs.forEach(r => filledKeys.forEach(key => {
+      const s = compareScoreOf((r.result.sections || {})[key]);
+      if (s === null) return;
+      sum += Math.abs(s - Number(human[key]));
+      n++;
+    }));
+    if (n) {
+      cards.push(`<div class="cmp-summary-card"><div class="cmp-summary-label">AI vs human</div>` +
+        `<div class="cmp-summary-value">${Math.round((sum / n) * 10) / 10}</div>` +
+        `<div class="cmp-summary-sub">avg points apart per section, across ${filledKeys.length} scored</div></div>`);
+    }
+  }
+
+  return `<div class="cmp-summary">${cards.join('')}</div>`;
+}
+
+async function loadCompare() {
+  const wrap = document.getElementById('compare-wrap');
+  if (!submissionsCache || !submissionsCache.length) {
+    if (wrap) wrap.innerHTML = '<div class="empty-state">Loading…</div>';
+    try { await fetchSubmissions(); }
+    catch (err) {
+      if (wrap) wrap.innerHTML = `<div class="empty-state">Couldn't load the grading log: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
+  }
+  populateComparePickers();
+  renderCompare();
+}
 
 // Which roster column says whether this person is already signed off for the
 // session type they were just graded on. An already-certified person scoring
