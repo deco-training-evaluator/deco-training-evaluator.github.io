@@ -1483,6 +1483,18 @@
     margin-top: 4px;
     font-size: 11px;
     line-height: 1.35;
+    /* NOTE (2026-08-14): this measures 4.09 in light mode — under AA — and so do
+       nine other --text-muted rules across this card (.ai-verdict-eyebrow,
+       .ai-verdict-max, .ai-verdict-rule, .ai-detail-label, .score-note-mark,
+       .ai-section-footnote, .ai-corrections-intro, .ai-correction-tag,
+       .ai-note-label). It is the known "--text-muted on --sunken" value this
+       file already records. Pre-existing, identical on all three session types,
+       and fine in dark mode (6.5+), so it is a light-mode palette decision
+       across the whole result card rather than a defect in any one rule —
+       raised with Jordan rather than restyled unilaterally, same as the
+       Dashboard badge palette was. The established fix is --text-secondary
+       (measured 7.47 light / 10.55 dark here). Found while measuring the
+       Conversion Call card; NOT introduced by it. */
     color: var(--text-muted);
   }
   .ai-verdict-rule {
@@ -1768,9 +1780,25 @@
     letter-spacing: 0.02em;
     margin-bottom: 6px;
   }
-  .ai-callout.strong .ai-callout-label { color: var(--good); }
-  .ai-callout.weak .ai-callout-label { color: var(--critical); }
-  .ai-callout.focus .ai-callout-label { color: var(--warning); }
+  /* Each label is its tone pulled 22% toward the body text, the same treatment
+     as .alert-bar-title, .notice-err and the Dashboard badges — a bare
+     var(--tone) at 11px bold does not clear AA on a light card. Measured before:
+     Strong 4.45, Weak 4.86, Focus 4.92, Corrections 2.72. After: 6.25 / 6.77 /
+     6.76 light, 8.81 / 7.39 / 10.99 dark. One rule serves both schemes because
+     the mix darkens on light and lightens on dark — don't "clean it up" back to
+     a bare var(--tone).
+
+     The corrections label is mixed HARDER (60%, not 78%) and that is not a
+     stylistic preference: --brand-orange is light and saturated enough that 78%
+     still measured only 4.07, i.e. still failing. 60% gives 5.87 light / 9.26
+     dark. Measured, not guessed — 78% was tried first and rejected.
+
+     Pre-existing, and missed by the 2026-08-14 contrast pass because an AI
+     result card isn't in the DOM when signed out, so the full-DOM sweep never
+     saw these four. Found 2026-08-14 while measuring the Conversion Call card. */
+  .ai-callout.strong .ai-callout-label { color: color-mix(in srgb, var(--good) 78%, var(--text-primary)); }
+  .ai-callout.weak .ai-callout-label { color: color-mix(in srgb, var(--critical) 78%, var(--text-primary)); }
+  .ai-callout.focus .ai-callout-label { color: color-mix(in srgb, var(--warning) 78%, var(--text-primary)); }
   /* Each entry reads "Short label: what to do", and the label is bolded so the
      three columns can be skimmed by label alone. */
   .ai-callout-item { margin: 0 0 7px; }
@@ -1791,7 +1819,7 @@
     box-shadow: var(--shadow-sm);
     margin-bottom: 14px;
   }
-  .ai-corrections .ai-callout-label { color: var(--brand-orange); }
+  .ai-corrections .ai-callout-label { color: color-mix(in srgb, var(--brand-orange) 60%, var(--text-primary)); }
   .ai-corrections-intro {
     margin: 0 0 12px;
     font-size: 12px;
@@ -2490,12 +2518,21 @@ const SESSION_TABS = [
     status: 'live'
   },
   {
+    // Live since 2026-08-14 (Code.gs V18). Jordan produced the rubric and asked
+    // for it wired up, which reverses the 2026-08-13 note that the recruiting
+    // tabs stay preview until after the hackathon — that note stands for the
+    // other three, which still have no rubric loaded.
+    //
+    // This is the first live type that grades a RECRUITING call rather than a
+    // field-training session, and two things fall out of that by construction
+    // rather than by special case: it has no entry in SESSION_CERT_COLUMN (a
+    // conversion-call pass is not a roster sign-off) and none in
+    // SESSION_PREREQUISITES (the Day 1/Day 2 training steps have no bearing on
+    // whether somebody can make a recruiting call).
     key: 'conversion',
     label: 'Conversion Call',
     sessionType: 'Conversion Call',
-    status: 'preview',
-    phase: 'Phase 3 · More session types',
-    blurb: 'Score a recorded conversion call the same way a Training Day is scored — section by section, with short written feedback and jump-to-the-moment timestamps for anything worth a second listen.'
+    status: 'live'
   },
   {
     key: 'stage1',
@@ -3170,6 +3207,16 @@ function showTab(name) {
   }
 }
 
+/* What to call the person being graded, per session type. It isn't cosmetic on
+   the Conversion Call tab: the caller is a district or operations manager doing
+   recruiting, not somebody in training, and a field marked "Trainee" reads as
+   though the wrong person should be picked. */
+const SESSION_SUBJECT_LABEL = {
+  'Training Day': 'Trainee',
+  'Team On-Site Day': 'Person being observed',
+  'Conversion Call': 'Caller being graded'
+};
+
 // Point the shared form at a session type: the manual grade is on the rubric's
 // own scale, which differs per type (110 for Training Day, 50 for Team On-Site
 // Day), so the cap and the label both have to follow the tab.
@@ -3180,7 +3227,7 @@ function applySessionTypeToForm(liveTab) {
   document.getElementById('g-grade-max-label').textContent = String(max);
   gradeInput.placeholder = `e.g. ${Math.round(max * 0.84)}`;
   document.getElementById('g-trainee-label').textContent =
-    liveTab.sessionType === 'Team On-Site Day' ? 'Person being observed' : 'Trainee';
+    SESSION_SUBJECT_LABEL[liveTab.sessionType] || 'Trainee';
   // The pass mark moves with the tab (85 of 110 vs 38 of 50), so a grade left
   // in the box must be re-read against the new bar rather than keep the old
   // tab's verdict on screen.
@@ -6064,7 +6111,12 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
 // Same totals the Apps Script backend uses (Code.gs MAX_POSSIBLE) — the API
 // response itself doesn't include max_possible, so it's re-derived here from
 // session_type to show "score / max" in the summary row.
-const SESSION_MAX_POSSIBLE = { 'Team On-Site Day': 50, 'Training Day': 110 };
+/* Conversion Call is 80 because its rubric has 8 categories out of 10 each. Its
+   source document actually combines them as a WEIGHTED average out of 10; the
+   app scores it as a flat sum instead (Jordan's call, 2026-08-14) so it works
+   like every other type. See the note on SECTION_KEYS in Code.gs — a manual
+   grade typed on this tab is therefore on the /80 scale, not the rubric's /10. */
+const SESSION_MAX_POSSIBLE = { 'Team On-Site Day': 50, 'Training Day': 110, 'Conversion Call': 80 };
 
 /* ---------------------- Evidence timestamps ----------------------
    Every section can carry evidence_clips — the moments the AI says drove its
@@ -6443,9 +6495,27 @@ function scoreBadge(score, evidenceBasis) {
   return `<span class="badge ${cls}">${escapeHtml(String(score))}/10</span>`;
 }
 
-function certifiedBadge(certified) {
-  if (certified === 'Yes') return `<span class="badge good">${checkIcon()}Certified</span>`;
-  if (certified === 'No') return `<span class="badge critical">${xIcon()}Not certified</span>`;
+/* The word on the badge follows the session type, because "Certified" is a claim
+   about the Roster and it is only true for the two types that have a
+   certification column. A conversion call is a recruiting call: passing it signs
+   nobody off on anything, and a badge reading "Certified" over a recruiting
+   score would invite exactly the reading this app spends so much effort
+   avoiding. PASS / FAIL is also the source rubric's own language. */
+const VERDICT_WORDS = {
+  'Conversion Call': { yes: 'Pass', no: 'Fail', noun: 'A pass', failPhrase: 'a fail' }
+};
+const VERDICT_WORDS_DEFAULT = {
+  yes: 'Certified', no: 'Not certified', noun: 'Certified', failPhrase: 'not certified'
+};
+
+function verdictWords(sessionType) {
+  return VERDICT_WORDS[sessionType] || VERDICT_WORDS_DEFAULT;
+}
+
+function certifiedBadge(certified, sessionType) {
+  const words = verdictWords(sessionType);
+  if (certified === 'Yes') return `<span class="badge good">${checkIcon()}${escapeHtml(words.yes)}</span>`;
+  if (certified === 'No') return `<span class="badge critical">${xIcon()}${escapeHtml(words.no)}</span>`;
   return `<span class="badge pending">${dashIcon()}${escapeHtml(certified || 'Unknown')}</span>`;
 }
 
@@ -6517,7 +6587,12 @@ function normalizeCorrections(list) {
 // a Team On-Site Day only until the manager drives away.
 const CORRECTIONS_HEADING = {
   'Training Day': 'Corrections to make before the end of Day 2',
-  'Team On-Site Day': 'Corrections to make before leaving the site'
+  'Team On-Site Day': 'Corrections to make before leaving the site',
+  // A phone call is already over by the time it's graded, so there is no
+  // in-session deadline to name. The list is what has to be put right with this
+  // candidate before they go any further through the hiring process — which is
+  // also where an automatic-fail condition from the rubric shows up.
+  'Conversion Call': 'To follow up on with this candidate'
 };
 
 function correctionsBlock(result, interactive) {
@@ -6570,9 +6645,18 @@ function correctionsBlock(result, interactive) {
     </div>`;
   }).join('');
 
+  // "While you're still with them" is true of a Training Day or a site visit and
+  // false of a phone call, which is over before it is ever uploaded. The list
+  // still earns its place there — it is what has to be put right with the
+  // candidate before they go further through the hiring process, and it is where
+  // an automatic-fail condition from the rubric surfaces.
+  const intro = result.session_type === 'Conversion Call'
+    ? `What to put right with this candidate before they go any further. Same caveat as the rest of this card — listen to the moment before you act on it. This is a prompt for your judgement, not a verdict.`
+    : `What to go back over while you're still with them. Same caveat as the rest of this card — listen to the moment before you correct someone on it. This is a prompt for your judgement, not a verdict.`;
+
   return `<div class="ai-corrections">
     <span class="ai-callout-label">${escapeHtml(heading)}</span>
-    <p class="ai-corrections-intro">What to go back over while you're still with them. Same caveat as the rest of this card — listen to the moment before you correct someone on it. This is a prompt for your judgement, not a verdict.</p>
+    <p class="ai-corrections-intro">${escapeHtml(intro)}</p>
     ${rows}
   </div>`;
 }
@@ -6680,10 +6764,10 @@ function verdictHero(result, maxPossible) {
       ${max ? `<span class="ai-verdict-max">/ ${escapeHtml(String(max))}</span>` : ''}
     </div>
     ${max ? `<div class="ai-verdict-pct">${Math.round((total / max) * 100)}% overall</div>` : ''}
-    <div class="ai-verdict-badge">${certifiedBadge(result.certified)}</div>
+    <div class="ai-verdict-badge">${certifiedBadge(result.certified, result.session_type)}</div>
     ${meter}
     ${factsBlock}
-    <p class="ai-verdict-rule">${threshold ? `Certified needs <strong>${escapeHtml(String(threshold))} or more overall</strong> and <strong>every section at ${SECTION_PASS_MARK} or higher</strong> — so a total over the bar can still come back not certified. ` : ''}This is the AI's read of the recording. It's here to inform your grade, not to replace it.</p>
+    <p class="ai-verdict-rule">${threshold ? `${escapeHtml(verdictWords(result.session_type).noun)} needs <strong>${escapeHtml(String(threshold))} or more overall</strong> and <strong>every section at ${SECTION_PASS_MARK} or higher</strong> — so a total over the bar can still come back ${escapeHtml(verdictWords(result.session_type).failPhrase)}. ` : ''}This is the AI's read of the recording. It's here to inform your grade, not to replace it.</p>
   </div>`;
 }
 
@@ -7628,7 +7712,7 @@ async function loadRecentLog() {
 // Same numbers as the "Training Evaluations" / "Site Visit Evaluations"
 // Smartsheets and Code.gs. If a rubric's pass mark ever changes, it changes in
 // all three places or this list stops matching the grade it's reporting.
-const SESSION_PASS_THRESHOLD = { 'Training Day': 85, 'Team On-Site Day': 38 };
+const SESSION_PASS_THRESHOLD = { 'Training Day': 85, 'Team On-Site Day': 38, 'Conversion Call': 48 };
 const SECTION_PASS_MARK = 6;
 
 /* ========================= COMPARE TAB ====================================
