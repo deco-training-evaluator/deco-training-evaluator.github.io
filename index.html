@@ -1903,6 +1903,12 @@
   .cmp-table tr.cmp-total-row td { border-top: 2px solid var(--border-strong); background: var(--sunken); font-weight: 700; }
   .cmp-table tr.cmp-total-row .cmp-score { font-size: 17px; }
   .cmp-verdict-row td { background: var(--sunken); }
+  /* The grader's written note, one cell per session. Left-aligned and wrapped
+     because it's prose in a table of numbers, and capped in width so a long
+     note can't stretch the column past what .cmp-scroll can handle. */
+  .cmp-note-row td { vertical-align: top; background: var(--sunken); }
+  .cmp-note-text { display: block; max-width: 240px; text-align: left; white-space: pre-wrap;
+                   font-size: 11.5px; line-height: 1.5; color: var(--text-primary); font-weight: 400; }
   .cmp-summary { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
   .cmp-summary-card { flex: 1 1 190px; padding: 11px 13px; border: 1px solid var(--border);
                       border-radius: 10px; background: var(--surface-1); }
@@ -1946,6 +1952,28 @@
   .log-row td { white-space: nowrap; }
   .log-detail-row > td { padding: 0; background: var(--surface-1); white-space: normal; }
   .log-detail-row .ai-result-box { margin: 0; border: none; border-radius: 0; background: transparent; padding: 18px 24px; }
+
+  /* The grader's written note (column F). Sits directly above the AI's card
+     wherever a session opens, so it is deliberately tinted and labelled rather
+     than set as plain text — unattributed prose above that card reads as
+     something the AI wrote. --text-secondary on the label, never --text-muted:
+     muted measures 4.09 on --sunken and this ground is close to it. */
+  .manager-note {
+    border-left: 4px solid color-mix(in srgb, var(--accent) 60%, transparent);
+    background: color-mix(in srgb, var(--brand-orange) 8%, var(--sunken));
+    padding: 12px 15px;
+    border-radius: 8px;
+  }
+  .manager-note-label {
+    display: block;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 5px;
+  }
+  /* pre-wrap so the line breaks somebody typed into the textarea survive. */
+  .manager-note-text { display: block; white-space: pre-wrap; font-size: 13.5px; line-height: 1.55; color: var(--text-primary); }
+  .log-detail-row .manager-note { margin: 18px 24px 0; }
+  .log-detail-row .manager-note + .ai-result-box { padding-top: 14px; }
   .log-table td.log-delete-cell { width: 1%; text-align: right; }
   .log-delete-btn {
     display: inline-flex;
@@ -2110,6 +2138,13 @@
   .ps-label { color: var(--text-muted); font-weight: 600; margin-right: 4px; }
   .ps-listen { color: var(--brand-orange); font-weight: 600; text-decoration: none; white-space: nowrap; }
   .ps-listen:hover { text-decoration: underline; }
+  /* Full-bleed inside the session card, so it drops the pill radius and takes a
+     top border to separate it from the row heading above it. */
+  .person-session .manager-note {
+    margin: 0;
+    border-radius: 0;
+    border-top: 1px solid var(--border);
+  }
   .person-session .ai-result-box {
     margin: 0;
     border: none;
@@ -3458,6 +3493,9 @@ async function renderPersonSessions(name, container) {
 
   sessions.forEach((s, i) => {
     const hasAi = !!parsedAi[i];
+    // Same rule as Recent Submissions: a manual-only grade with a note opens too.
+    const noteHtml = managerNoteBlock(s);
+    const canExpand = hasAi || !!noteHtml;
     const when = s.when ? new Date(s.when).toLocaleDateString() : '';
     const manual = s.manualGrade
       ? escapeHtml(s.manualGrade)
@@ -3472,9 +3510,9 @@ async function renderPersonSessions(name, container) {
     const listen = audio
       ? `<a class="ps-listen" href="${escapeHtml(audio)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Open in Drive</a>`
       : `<span class="grade-cell-muted">No recording</span>`;
-    html += `<div class="person-session${hasAi ? ' has-ai' : ''}" data-session-index="${i}">` +
+    html += `<div class="person-session${canExpand ? ' has-ai' : ''}" data-session-index="${i}">` +
       `<div class="person-session-head">` +
-        (hasAi ? '<span class="log-chevron">&#9656;</span>' : '') +
+        (canExpand ? '<span class="log-chevron">&#9656;</span>' : '') +
         `<span class="ps-type">${escapeHtml(s.type || 'Training Day')}</span>` +
         `<span class="ps-when">${escapeHtml(when)}</span>` +
         `<span class="ps-right">` +
@@ -3484,30 +3522,37 @@ async function renderPersonSessions(name, container) {
           listen +
         `</span>` +
       `</div>` +
-      `<div class="ai-result-box hidden" id="ps-detail-${escapeHtml(String(i))}-${escapeHtml(cssSafeKey(name))}"></div>` +
+      // Note and AI card share one collapsible wrapper, so opening the card
+      // reveals both — the note can't be the thing that's left behind.
+      (canExpand
+        ? `<div class="ps-detail hidden">` + noteHtml +
+            `<div class="ai-result-box" id="ps-detail-${escapeHtml(String(i))}-${escapeHtml(cssSafeKey(name))}"></div>` +
+          `</div>`
+        : '') +
     `</div>`;
   });
   container.innerHTML = html;
 
   sessions.forEach((s, i) => {
     const result = parsedAi[i];
-    if (!result) return;
     const card = container.querySelector(`.person-session[data-session-index="${i}"]`);
     const head = card && card.querySelector('.person-session-head');
-    const box = card && card.querySelector('.ai-result-box');
-    if (!head || !box) return;
+    const detail = card && card.querySelector('.ps-detail');
+    const box = detail && detail.querySelector('.ai-result-box');
+    // No wrapper means nothing to open — neither an AI grade nor a note.
+    if (!head || !detail) return;
     let rendered = false;
     head.addEventListener('click', () => {
       const isOpen = card.classList.contains('open');
       container.querySelectorAll('.person-session.open').forEach(el => {
         el.classList.remove('open');
-        const other = el.querySelector('.ai-result-box');
+        const other = el.querySelector('.ps-detail');
         if (other) other.classList.add('hidden');
       });
       if (!isOpen) {
         card.classList.add('open');
-        box.classList.remove('hidden');
-        if (!rendered) {
+        detail.classList.remove('hidden');
+        if (!rendered && result && box) {
           rendered = true;
           renderAiGradingResult(result, box, driveFileIdFromLink(audioLinkOf(s.audioLink)), s.transcriptLink);
         }
@@ -4460,6 +4505,15 @@ populateGraderDropdown();
    This only ever writes "Yes". A grade under the bar leaves the cell alone: a
    weak session doesn't revoke a certification somebody already holds, and
    that's a call for a manager, not for a form. */
+
+/* The grader's written note, typed into "Manual feedback" on the grading form
+   and written to column F of the manual row at submit time.
+
+   It was WRITE-ONLY until 2026-08-14: the form saved it and nothing ever read
+   it back, so the sentence explaining a manual grade was invisible in all four
+   places the grade itself showed up. Read it here and it stays in step with
+   every other column, rather than needing a second read of the sheet. */
+const MANUAL_FEEDBACK_IDX = 5;                     // F
 
 /* The grader's "every section scored 6 or higher" tick, recorded on the manual
    row at column W. It has to be written down, not just acted on: the log only
@@ -5769,6 +5823,31 @@ function audioLinkOf(link) {
   return /^https?:\/\//i.test(trimmed) ? trimmed : '';
 }
 
+// Column F of the Grading Log: what the grader typed into "Manual feedback".
+// Guarded the same way audioLinkOf guards column G — whitespace is nothing, so
+// a note that is only spaces doesn't open an empty panel headed "what the
+// grader wrote".
+function manualNoteOf(sub) {
+  return String((sub && sub.manualFeedback) || '').trim();
+}
+
+// The grader's note, drawn identically wherever a session can be opened up
+// (Recent Submissions, the expanded roster row, Follow-Ups). One helper because
+// three copies of a block this small is how they drift apart, and because the
+// label has to keep saying WHO wrote it: this sits directly above the AI's own
+// card, and a note with no attribution reads as something the AI produced.
+function managerNoteBlock(sub) {
+  const note = manualNoteOf(sub);
+  if (!note) return '';
+  const who = String((sub && sub.grader) || '').trim();
+  const label = (who && who !== GRADER_DID_NOT_ATTEND)
+    ? `What ${escapeHtml(who)} wrote about this session`
+    : 'What the grader wrote about this session';
+  return `<div class="manager-note">` +
+    `<span class="manager-note-label">${label}</span>` +
+    `<span class="manager-note-text">${escapeHtml(note)}</span></div>`;
+}
+
 // A Drive webViewLink ("https://drive.google.com/file/d/<id>/view?...") back to
 // the bare file ID, so a logged row can feed the same player a fresh result uses.
 function driveFileIdFromLink(link) {
@@ -6922,6 +7001,9 @@ async function fetchSubmissions() {
       when: base[0], trainee: base[1], type: base[2],
       grader: (manual && manual.r[3]) || (ai && ai.r[3]) || '',
       manualGrade: manual ? manual.r[4] : '',
+      // The grader's note, off the manual row for the same reason the grade is:
+      // an AI row never has one (Code.gs leaves F blank).
+      manualFeedback: manual ? (manual.r[MANUAL_FEEDBACK_IDX] || '') : '',
       // The other half of the certification rule, off the manual row. Blank on
       // anything submitted before it started being recorded — which is a real
       // "unknown", not a "no" (see manualCertifiedCell).
@@ -6943,6 +7025,7 @@ async function fetchSubmissions() {
       order: rowNumber, rowNumbers: [rowNumber],
       when: r[0], trainee: r[1], type: r[2], grader: r[3],
       manualGrade: r[7] === 'AI' ? '' : r[4],
+      manualFeedback: r[7] === 'AI' ? '' : (r[MANUAL_FEEDBACK_IDX] || ''),
       sectionsAllPass: r[7] === 'AI' ? '' : (r[MANUAL_SECTIONS_IDX] || ''),
       audioLink: r[6],
       transcriptLink: r[7] === 'AI' ? (r[TRANSCRIPT_LINK_IDX] || '') : '',
@@ -6989,7 +7072,12 @@ async function loadRecentLog() {
         ? `<a href="${escapeHtml(audio)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Listen</a>`
         : `<span class="grade-cell-muted">None</span>`;
       const hasAi = !!parsedAi[i];
-      const chevron = hasAi ? '<span class="log-chevron">&#9656;</span>' : '';
+      // A manual-only grade with a note is expandable too — the note is the
+      // whole reason to open it, and gating on the AI result would keep it
+      // hidden on exactly the sessions that have nothing else to show.
+      const noteHtml = managerNoteBlock(s);
+      const canExpand = hasAi || !!noteHtml;
+      const chevron = canExpand ? '<span class="log-chevron">&#9656;</span>' : '';
       const manualGradeCell = s.manualGrade
         ? escapeHtml(s.manualGrade)
         : `<span class="grade-cell-muted">${s.grader === 'Did not attend' ? '—' : 'None'}</span>`;
@@ -7002,12 +7090,15 @@ async function loadRecentLog() {
       const deleteCell = `<td class="log-delete-cell">` +
         `<button type="button" class="log-delete-btn" data-row-index="${i}" data-sheet-rows="${rowsAttr}" title="Delete this submission">${trashIcon()}<span class="log-delete-label">Delete</span></button>` +
         `</td>`;
-      html += `<tr class="log-row${hasAi ? ' has-ai' : ''}" data-row-index="${i}">` +
+      html += `<tr class="log-row${canExpand ? ' has-ai' : ''}" data-row-index="${i}">` +
         `<td class="log-chevron-cell">${chevron}</td>` +
         `<td>${escapeHtml(when)}</td><td>${escapeHtml(s.trainee)}</td><td>${escapeHtml(s.type)}</td>` +
         `<td>${escapeHtml(s.grader)}</td><td>${manualGradeCell}</td><td>${aiGradeCell}</td><td>${certifiedCell}</td><td>${audioCell}</td>${deleteCell}</tr>`;
-      if (hasAi) {
-        html += `<tr class="log-detail-row hidden" data-row-index="${i}"><td colspan="10"><div class="ai-result-box" id="log-detail-${i}"></div></td></tr>`;
+      if (canExpand) {
+        // The AI box is left empty on a note-only row, and .ai-result-box:empty
+        // hides it — so no bare panel under the note.
+        html += `<tr class="log-detail-row hidden" data-row-index="${i}"><td colspan="10">` +
+          noteHtml + `<div class="ai-result-box" id="log-detail-${i}"></div></td></tr>`;
       }
     });
     html += '</tbody></table>';
@@ -7020,9 +7111,9 @@ async function loadRecentLog() {
     // Wire up click-to-expand on rows that have an AI result, one open at a time.
     body.forEach((s, i) => {
       const aiResult = parsedAi[i];
-      if (!aiResult) return;
       const headerRow = wrap.querySelector(`tr.log-row[data-row-index="${i}"]`);
       const detailRow = wrap.querySelector(`tr.log-detail-row[data-row-index="${i}"]`);
+      // No detail row means nothing to open — neither an AI grade nor a note.
       if (!headerRow || !detailRow) return;
       let rendered = false;
       headerRow.addEventListener('click', () => {
@@ -7035,7 +7126,9 @@ async function loadRecentLog() {
         if (!isOpen) {
           headerRow.classList.add('open');
           detailRow.classList.remove('hidden');
-          if (!rendered) {
+          // The note is already in the markup; only the AI card is built lazily,
+          // and a note-only row has no card to build.
+          if (!rendered && aiResult) {
             // The audio link in column G is the only place a logged row records
             // which recording it came from — pull the Drive ID back out of it so
             // this row's timestamps are clickable too, not just a fresh result's.
@@ -7367,6 +7460,25 @@ function renderCompare() {
     ? ((humanTotal >= threshold && filledKeys.every(k => Number(human[k]) >= SECTION_PASS_MARK)) ? 'Yes' : 'No')
     : '—';
 
+  // What the grader wrote when each of these sessions was submitted. It belongs
+  // under the run column rather than the human one because each column IS one
+  // session — the note came in on the same form as that recording — and it's
+  // the closest thing on this tab to "why the human graded it that way", which
+  // is the question the whole tab exists to answer. Only drawn when at least
+  // one session has a note; an empty row of dashes earns nothing on a table
+  // already this wide.
+  const anyNote = runs.some(r => manualNoteOf(r.sub));
+  const noteRow = anyNote
+    ? `<tr class="cmp-note-row"><td class="cmp-section-name">Grader's note</td>` +
+      runs.map(r => {
+        const note = manualNoteOf(r.sub);
+        return `<td>${note
+          ? `<span class="cmp-note-text">${escapeHtml(note)}</span>`
+          : `<span class="cmp-cell-note">none written</span>`}</td>`;
+      }).join('') +
+      `<td><span class="cmp-cell-note">typed on the grading form</span></td></tr>`
+    : '';
+
   wrap.innerHTML =
     compareSummary(runs, keys, human, filledKeys, humanTotal, max) +
     `<div class="cmp-scroll"><table class="cmp-table">` +
@@ -7377,6 +7489,7 @@ function renderCompare() {
         `<tr class="cmp-total-row"><td class="cmp-section-name">Total</td>${totalCells}${humanTotalCell}</tr>` +
         `<tr class="cmp-verdict-row"><td class="cmp-section-name">Certified</td>${verdictCells}` +
         `<td>${humanVerdict}</td></tr>` +
+        noteRow +
       `</tbody></table></div>` +
     `<div class="cmp-storage-note">The human column is saved <strong>on this browser only</strong> — it isn't ` +
     `written to the Grading Log, so a colleague opening this page won't see it. Log what you learn in the ` +
@@ -7689,6 +7802,9 @@ function renderFollowUps() {
         `<button type="button" class="btn secondary fu-note-save" data-row-index="${i}">Save note</button>` +
         `<span class="followup-saved hidden">Saved</span>` +
       `</div>` +
+      // What the grader wrote at submission time, above the AI's card — on a
+      // coaching queue that context is worth as much as the score is.
+      managerNoteBlock(item.sub) +
       `<div class="ai-result-box" id="fu-detail-${i}"></div>` +
     `</td></tr>`;
   });
