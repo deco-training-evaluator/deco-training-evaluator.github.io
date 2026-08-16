@@ -893,6 +893,10 @@
   }
   .edit-status:empty { display: none; margin: 0; }
   form.grading-form { display: flex; flex-direction: column; gap: 18px; max-width: 580px; }
+  /* The variant picker sits outside the form (see the markup comment), so it
+     has to reproduce the form's width and the gap it would have had as a field. */
+  .variant-field { max-width: 580px; margin-bottom: 18px; }
+  .variant-field.hidden { display: none; }
   .field label {
     display: block;
     font-size: 12.5px;
@@ -2422,10 +2426,15 @@
         they're left off — everyone else on the Roster is here, including any role added later.
         <br><strong>Changing a status:</strong> click any badge to change it — it writes straight back to the
         Roster sheet, and asks you to click again to confirm.
-        <br><strong>Conversion Calls certify from a grade; the other four are ticked by hand.</strong>
-        Submitting a <em>manual</em> grade of 48/80 or better with every section at 6 or higher ticks the
-        Conversion Call column here for you. The other four rubrics aren't loaded yet, so there's no score to
-        certify off — those badges are a person's decision and nothing else.
+        <br><strong>Four of these certify from a grade; Stage 1 Interview is ticked by hand.</strong>
+        Submitting a <em>manual</em> grade with every section at 6 or higher ticks the matching column here for
+        you &mdash; 48/80 or better on a Conversion Call, 42/70 or better on either reference check, 54/90 or
+        better on a Stage 2 Interview. The Stage 1 Interview rubric isn't loaded yet, so there's no score to
+        certify off &mdash; that badge is a person's decision and nothing else.
+        <br><strong>The two reference checks are counted separately</strong>, because they're two different
+        rubrics for two different calls. Passing the candidate one doesn't certify the parent one.
+        <br><strong>Networking Activities are graded but have no column here</strong>, so a passing grade on one
+        signs nobody off. They still show up under a person's name when you open their row.
         <br><strong>A passing AI grade never ticks anything here</strong>, on any of the five. Only a grade a
         human signed off moves these columns.
         <br><strong>Adding someone</strong> is on the Training/TOSD Dashboard tab, which lists the whole Roster.
@@ -2530,6 +2539,22 @@
       <span class="pill" id="grading-pill">DECO | Training Day</span>
       <div id="grading-background-note" class="note hidden"></div>
       <div class="panel">
+        <!-- Which rubric this tab is pointed at, for the tabs that cover more
+             than one session type (Reference Checks covers the candidate check
+             and the parent check). Hidden on every other tab.
+
+             DELIBERATELY OUTSIDE THE <form>. resetGradingPanel() calls
+             form.reset(), which silently puts every control back to its first
+             option — so in here the picker would snap back to "Reference Check"
+             while currentSessionType still said "Parent Reference Check". The
+             form would then be labelled one rubric and submit the other, which
+             is the worst kind of bug this app can have: nothing on screen is
+             wrong, and the grade is filed against the wrong rubric. -->
+        <div class="field variant-field hidden" id="g-variant-field">
+          <label for="g-variant">Which check is this?</label>
+          <select id="g-variant"></select>
+          <div class="field-hint" id="g-variant-hint"></div>
+        </div>
         <form class="grading-form" id="grading-form">
           <div class="field">
             <label for="g-trainee" id="g-trainee-label">Trainee</label>
@@ -2662,6 +2687,32 @@ const SESSION_TABS = [
     status: 'live'
   },
   {
+    // LIVE since 2026-08-15 (Code.gs V21). Jordan produced the rubric and asked
+    // for it wired up on the recruiting side.
+    //
+    // IT SITS HERE, BEFORE THE CONVERSION CALL, BECAUSE TAB ORDER IS PROCESS
+    // ORDER and this is the step that feeds the call. A networking activity is
+    // the only graded session type at the TOP of the funnel — the only one that
+    // CREATES candidates rather than filtering them. The names and introductions
+    // it produces are what later become qualifications and conversion calls.
+    //
+    // NO certification column, and that is a decision rather than an omission:
+    // Jordan was asked directly on 2026-08-15 and chose live grading without
+    // one. So SESSION_CERT_COLUMN has no entry, the auto-certify path and the
+    // post-delete un-certify offer are inert by construction, and a passing
+    // manual grade signs nobody off. Adding a sixth Recruiting Dashboard column
+    // later is small; making it now would be the app deciding something nobody
+    // asked for.
+    //
+    // No SESSION_PREREQUISITES entry either — the Day 1/Day 2 training steps
+    // have no bearing on running a networking activity, same as the Conversion
+    // Call. The verdict reads Pass / Fail (VERDICT_WORDS), not Certified.
+    key: 'networking',
+    label: 'Networking Activity',
+    sessionType: 'Networking Activity',
+    status: 'live'
+  },
+  {
     // Live since 2026-08-14 (Code.gs V18). Jordan produced the rubric and asked
     // for it wired up, which reverses the 2026-08-13 note that the recruiting
     // tabs stay preview until after the hackathon — that note stands for the
@@ -2701,24 +2752,64 @@ const SESSION_TABS = [
     // Sits between Stage 1 and Stage 2 because that's where it falls in the
     // real hiring process — references get called after the first interview,
     // before the second. The tab order IS the process order; keep it that way.
+    // LIVE since 2026-08-15 (Code.gs V19). Jordan produced both rubrics and
+    // asked for them wired up, with the picker he specified back in August:
+    // "both should be under the same tab and there is just a box or something
+    // that you choose which one it is."
+    //
+    // THIS IS THE FIRST TAB THAT COVERS TWO SESSION TYPES, and `variants` is
+    // what makes that work. They are two genuinely separate rubrics — different
+    // categories, different weights, different automatic fails — so they need
+    // two sessionType strings in Code.gs, two Recent Submissions lists and two
+    // certification columns. The tab is the only thing they share.
     key: 'reference',
     label: 'Reference Checks',
     // The tab is plural (it holds two kinds); a single graded session isn't.
     // Used wherever the copy talks about one recording.
     singular: 'Reference Check',
+    // The variant selected when the tab is first opened, and the fallback
+    // whenever the picker's value isn't one of the variants.
     sessionType: 'Reference Check',
     variants: ['Reference Check', 'Parent Reference Check'],
-    status: 'preview',
-    phase: 'Phase 3 · More session types',
-    blurb: 'Score a recorded reference check against DECO&rsquo;s own criteria, so every candidate gets read the same way no matter who made the call. Candidate reference checks and parent reference checks both live here &mdash; you pick which one you&rsquo;re grading.'
+    // What each variant is called on the picker, and the one line explaining
+    // when you'd use it. The parent check exists because DECO has lost
+    // candidates to a parent talking them out of the job (Jordan, 2026-08-15).
+    variantLabels: {
+      'Reference Check': 'Reference check — someone the candidate listed',
+      'Parent Reference Check': 'Parent reference check — the candidate\'s parent or guardian'
+    },
+    variantHints: {
+      'Reference Check': 'A professional or personal reference the candidate supplied. Graded on the quality of the evidence the caller got out of them — a call that surfaces real concerns scores high.',
+      'Parent Reference Check': 'Run for candidates under 23, to get ahead of a parent who might talk them out of the job. Half the call is explaining the role accurately; the other half is getting past reflexive praise.'
+    },
+    status: 'live'
   },
   {
+    // LIVE since 2026-08-15 (Code.gs V20). Jordan produced the rubric and asked
+    // for it wired up, the same way the Conversion Call and the two reference
+    // checks were.
+    //
+    // THE FIRST GRADED TYPE THAT IS AN INTERVIEW RATHER THAN A CALL. That
+    // difference lives in the prompt rather than here: a Stage 2 interview may
+    // have been held in person, so Code.gs states the audio carve-out about the
+    // RUBRIC ("every criterion here is verbal") instead of about the medium, and
+    // tells the grader never to penalise body language it cannot see.
+    //
+    // It grades the INTERVIEWER's execution and never the candidate — a weak
+    // candidate who was properly probed is a HIGH score. No entry in
+    // SESSION_PREREQUISITES, because Day 1/Day 2 field training has no bearing
+    // on running a recruiting interview.
+    //
+    // It DOES have a certification column (Jordan's call, asked and answered
+    // 2026-08-15): a passing MANUAL grade of 54+ with the sections box ticked
+    // signs somebody off for Stage 2 Interviews on the Recruiting Dashboard. The
+    // AI's own verdict still reads Pass / Fail and still writes nothing.
+    // One pass certifies — no SESSION_PASSES_REQUIRED entry, because an
+    // interview is one sitting.
     key: 'stage2',
     label: 'Stage 2 Interview',
     sessionType: 'Stage 2 Interview',
-    status: 'preview',
-    phase: 'Phase 3 · More session types',
-    blurb: 'Score a recorded second-stage interview on the same scale, so the two interview stages can be put side by side for the same candidate.'
+    status: 'live'
   }
 ];
 
@@ -3438,12 +3529,70 @@ document.getElementById('cmp-refresh-btn').addEventListener('click', async () =>
   populateComparePickers();
   renderCompare();
 });
+/* Changing the variant is the same event as switching tabs — a different rubric,
+   a different scale, a different Recent Submissions list — so it goes back
+   through showTab() rather than reimplementing half of it here. */
+document.getElementById('g-variant').addEventListener('change', () => {
+  if (activeTabKey) showTab(activeTabKey);
+});
 renderTabNav();
 renderPreviewTabs();
+
+/* Which session type a live tab is currently pointed at.
+
+   For every tab but Reference Checks this is just the tab's own sessionType.
+   A tab with `variants` covers two, and the picker decides which — so this is
+   the single place that answers "what is being graded right now", and
+   currentSessionType is set from it. Falls back to the tab's declared
+   sessionType whenever the picker holds anything unexpected, so a stale or
+   hand-edited value can never put the app on a session type Code.gs has no
+   rubric for. */
+function sessionTypeForTab(tab) {
+  if (!tab || !tab.variants) return tab ? tab.sessionType : currentSessionType;
+  const sel = document.getElementById('g-variant');
+  const picked = sel ? sel.value : '';
+  return tab.variants.indexOf(picked) !== -1 ? picked : tab.sessionType;
+}
+
+/* Point the picker at the tab in front and at the variant now active.
+
+   Called AFTER resetGradingPanel(), because that runs form.reset() — and while
+   this control lives outside the form precisely so reset can't touch it, the
+   ordering still matters: this is what re-states the selection on screen after
+   a tab switch has re-derived it. */
+function syncVariantPicker(tab) {
+  const field = document.getElementById('g-variant-field');
+  const sel = document.getElementById('g-variant');
+  const hint = document.getElementById('g-variant-hint');
+  if (!tab || !tab.variants) {
+    field.classList.add('hidden');
+    return;
+  }
+  const labels = tab.variantLabels || {};
+  const options = tab.variants
+    .map(v => `<option value="${escapeHtml(v)}">${escapeHtml(labels[v] || v)}</option>`)
+    .join('');
+  // Only rebuild when the options actually changed — replacing innerHTML while
+  // the select has focus drops the focus ring mid-keyboard-navigation.
+  if (sel.dataset.builtFor !== tab.key) {
+    sel.innerHTML = options;
+    sel.dataset.builtFor = tab.key;
+  }
+  sel.value = currentSessionType;
+  const hintText = (tab.variantHints || {})[currentSessionType] || '';
+  hint.textContent = hintText;
+  hint.classList.toggle('hidden', !hintText);
+  field.classList.remove('hidden');
+}
+
+// Which tab is on screen, so the variant picker's own change handler can send
+// showTab() back through the same path a tab click takes.
+let activeTabKey = null;
 
 function showTab(name) {
   const previousSessionType = currentSessionType;
   const liveTab = LIVE_SESSION_TABS.find(t => t.key === name);
+  activeTabKey = name;
 
   // Panels: dashboard, follow-ups, the one shared grading panel, and one per preview tab.
   document.getElementById('tab-dashboard').classList.toggle('hidden', name !== 'dashboard');
@@ -3471,18 +3620,27 @@ function showTab(name) {
 
   if (!liveTab) return;
 
-  currentSessionType = liveTab.sessionType;
-  document.getElementById('grading-pill').textContent = `DECO | ${liveTab.label}`;
-  document.getElementById('recent-log-heading').textContent = `Recent ${liveTab.label} submissions`;
+  currentSessionType = sessionTypeForTab(liveTab);
+  /* The pill and the heading name the SESSION TYPE, not the tab. They are the
+     same string on every tab except Reference Checks, where the tab is called
+     "Reference Checks" and the list below it holds only the variant in front —
+     so labelling that list with the tab name would promise rows it is filtering
+     out. Naming the active rubric also makes it obvious which one is loaded. */
+  document.getElementById('grading-pill').textContent = `DECO | ${currentSessionType}`;
+  document.getElementById('recent-log-heading').textContent = `Recent ${currentSessionType} submissions`;
   applySessionTypeToForm(liveTab);
 
   // Moving between the two live grading tabs re-points a shared panel, so
   // clear out anything belonging to the session type just left — a half-filled
   // form or a previous result sitting under a new heading would be misleading.
+  // Switching VARIANT counts for the same reason: it is a different rubric, on
+  // a different scale, with a different Recent Submissions list.
   if (previousSessionType !== currentSessionType) {
     resetGradingPanel();
     loadRecentLog();
   }
+  // After the reset, so the picker states the variant that actually survived it.
+  syncVariantPicker(liveTab);
 }
 
 /* What to call the person being graded, per session type. It isn't cosmetic on
@@ -3492,7 +3650,23 @@ function showTab(name) {
 const SESSION_SUBJECT_LABEL = {
   'Training Day': 'Trainee',
   'Team On-Site Day': 'Person being observed',
-  'Conversion Call': 'Caller being graded'
+  'Conversion Call': 'Caller being graded',
+  // The DECO manager who made the call, never the reference and never the
+  // candidate. Picking the candidate here would file the grade against somebody
+  // who is not on DECO's roster and was not being graded.
+  'Reference Check': 'Caller being graded',
+  'Parent Reference Check': 'Caller being graded',
+  // An interview has an interviewer, not a caller. Same reasoning one step on:
+  // the person graded is the DECO manager running it, never the candidate, and
+  // picking the candidate here would file the grade against somebody who is not
+  // on DECO's roster and was not being graded.
+  'Stage 2 Interview': 'Interviewer being graded',
+  // "Facilitator" is the word Jordan's rubric uses throughout, and the same
+  // reasoning applies one step further on: no call is made and no interview is
+  // run, and the other person at the table is a PARTICIPANT who has applied for
+  // nothing. Picking them here would file the grade against somebody who is not
+  // on DECO's roster and was not being graded.
+  'Networking Activity': 'Facilitator being graded'
 };
 
 // Point the shared form at a session type: the manual grade is on the rubric's
@@ -3725,15 +3899,18 @@ const ROSTER_SHORT_LABELS = {
      parent reference check are two different session types with two different
      rubrics — the same reason they need two sessionType strings in Code.gs,
      even though they share one tab.
-   - **Four of these five are HUMAN-ticked only; Conversion Call is wired up.**
-     SESSION_CERT_COLUMN is what lets a passing manual grade write a
+   - **Four of these five certify from a grade; Stage 1 Interview is HUMAN-ticked
+     only.** SESSION_CERT_COLUMN is what lets a passing manual grade write a
      certification onto the Roster and what raises the un-certify offer after a
      delete. Conversion Calls joined it on 2026-08-14 (Jordan: "if they got a
      passing grade they are now certified, only for manual entries") — the
      decision this note said should be made deliberately rather than fall out of
-     adding a column. The other four stay out of it because they have no rubric
-     loaded at all: there is no score there to certify off, so a badge on those
-     columns is a manager's tick and nothing else.
+     adding a column — and both reference checks and Stage 2 joined on
+     2026-08-15 as their rubrics went live, each on Jordan's explicit answer to
+     that same question. Stage 1 stays out for the reason that governed all of
+     them: no rubric loaded means no score to certify off, so that badge is a
+     manager's tick and nothing else. A Networking Activity is graded and has no
+     column here at all — also Jordan's call — so it can certify nobody.
    - **Who appears is decided by EXCLUDING field managers, not by listing the
      senior roles.** An include-list would silently drop a role nobody has
      invented yet — a new senior title would vanish from this board with nothing
@@ -3763,9 +3940,21 @@ const RECRUITING_CERT_COLUMNS = [
 // expanded row there shows recruiting calls rather than the person's Training
 // Days. Matches the sessionType strings the grading form sends.
 const RECRUITING_SESSION_TYPES = [
+  // Networking Activity leads because it leads the funnel — it is the step that
+  // produces the people the rest of this list then works through.
+  'Networking Activity',
   'Conversion Call', 'Stage 1 Interview', 'Reference Check',
   'Parent Reference Check', 'Stage 2 Interview'
 ];
+
+/* The recruiting types that are actually GRADED — i.e. that Code.gs has a rubric
+   for. Mirrors CALL_SESSION_TYPES in Code.gs, which decides the rule set, the
+   JSON field order and the transcription speaker labels on that side.
+
+   Kept separate from RECRUITING_SESSION_TYPES above, which is about which BOARD
+   a session belongs on: a Stage 1 Interview is a recruiting session with nowhere
+   to be graded, and the two lists answer different questions. */
+const CALL_SESSION_TYPES = ['Conversion Call', 'Reference Check', 'Parent Reference Check'];
 
 const NON_RECRUITING_ROLE_KEYWORDS = ['field manager'];
 
@@ -7274,7 +7463,16 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
    app scores it as a flat sum instead (Jordan's call, 2026-08-14) so it works
    like every other type. See the note on SECTION_KEYS in Code.gs — a manual
    grade typed on this tab is therefore on the /80 scale, not the rubric's /10. */
-const SESSION_MAX_POSSIBLE = { 'Team On-Site Day': 50, 'Training Day': 110, 'Conversion Call': 80 };
+const SESSION_MAX_POSSIBLE = {
+  'Team On-Site Day': 50, 'Training Day': 110, 'Conversion Call': 80,
+  // Both reference checks are 7 categories out of 10 (Code.gs V19).
+  'Reference Check': 70, 'Parent Reference Check': 70,
+  // Stage 2 Interview is 9 categories out of 10 (Code.gs V20).
+  'Stage 2 Interview': 90,
+  // Networking Activity is 8 categories out of 10 (Code.gs V21) — same 80 as the
+  // Conversion Call, and the same 48 pass mark, because both run to 8 categories.
+  'Networking Activity': 80
+};
 
 /* ---------------------- Evidence timestamps ----------------------
    Every section can carry evidence_clips — the moments the AI says drove its
@@ -7674,7 +7872,22 @@ function scoreBadge(score, evidenceBasis) {
    off moves that column, so a card reading "Certified" over an AI score would
    claim precisely the authority this app withholds until Phase 5. */
 const VERDICT_WORDS = {
-  'Conversion Call': { yes: 'Pass', no: 'Fail', noun: 'A pass', failPhrase: 'a fail' }
+  'Conversion Call': { yes: 'Pass', no: 'Fail', noun: 'A pass', failPhrase: 'a fail' },
+  // Both reference checks certify from a passing MANUAL grade (Jordan,
+  // 2026-08-15) exactly like a Conversion Call — and for exactly that reason the
+  // AI's own card must keep saying Pass / Fail. "Certified" over an AI score
+  // would claim the authority only a human's sign-off carries.
+  'Reference Check': { yes: 'Pass', no: 'Fail', noun: 'A pass', failPhrase: 'a fail' },
+  'Parent Reference Check': { yes: 'Pass', no: 'Fail', noun: 'A pass', failPhrase: 'a fail' },
+  // Stage 2 Interview (Code.gs V20). Certifies from a passing MANUAL grade as of
+  // 2026-08-15, which is exactly why the AI's card must go on saying Pass / Fail:
+  // "Certified" over an AI score would claim the authority only a human's
+  // sign-off carries, and this is the last gate before corporate approval.
+  'Stage 2 Interview': { yes: 'Pass', no: 'Fail', noun: 'A pass', failPhrase: 'a fail' },
+  // Networking Activity (Code.gs V21). The only live recruiting type with NO
+  // certification column at all — Jordan chose live grading without one — so
+  // "Certified" here would name a badge that does not exist anywhere in the app.
+  'Networking Activity': { yes: 'Pass', no: 'Fail', noun: 'A pass', failPhrase: 'a fail' }
 };
 const VERDICT_WORDS_DEFAULT = {
   yes: 'Certified', no: 'Not certified', noun: 'Certified', failPhrase: 'not certified'
@@ -7764,7 +7977,19 @@ const CORRECTIONS_HEADING = {
   // in-session deadline to name. The list is what has to be put right with this
   // candidate before they go any further through the hiring process — which is
   // also where an automatic-fail condition from the rubric shows up.
-  'Conversion Call': 'To follow up on with this candidate'
+  'Conversion Call': 'To follow up on with this candidate',
+  // Same reasoning on a reference check, with one addition worth naming in the
+  // heading: the most valuable thing on this list is usually a concern the
+  // reference raised that nobody followed up on. It is also the easiest thing
+  // to lose once the call ends, which is exactly what this list is for.
+  'Reference Check': 'To follow up on before this candidate goes further',
+  'Parent Reference Check': 'To follow up on before this candidate goes further',
+  // A networking activity sits between the two cases above, and it is the only
+  // session type that does. The meeting is over — but unlike a call, its
+  // follow-up is still live: an introduction never asked for can still be asked
+  // for, and a connection promised during the meeting can still be made. So the
+  // heading names the contact rather than a deadline.
+  'Networking Activity': 'To follow up on with this contact'
 };
 
 function correctionsBlock(result, interactive) {
@@ -7776,11 +8001,11 @@ function correctionsBlock(result, interactive) {
   const heading = CORRECTIONS_HEADING[result.session_type] || 'Corrections to make before the session ends';
 
   const rows = items.map(c => {
-    // Same title-casing the section list above uses, so a correction can be
-    // matched back to the section it came from at a glance.
-    const sectionLabel = c.section
-      ? c.section.replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase())
-      : '';
+    // Through the shared helper, so a correction names its section exactly as
+    // the section list above does. Named sectionName rather than sectionLabel
+    // because the helper it calls IS sectionLabel — shadowing it here is what
+    // kept three copies of this transform alive in the first place.
+    const sectionName = c.section ? sectionLabel(c.section) : '';
     const badge = c.priority === 'must_fix'
       ? `<span class="badge critical" title="A customer would be told something wrong, or a rule was broken — the AI puts this ahead of the rest.">Must fix</span>`
       : c.priority === 'should_fix'
@@ -7803,7 +8028,7 @@ function correctionsBlock(result, interactive) {
     return `<div class="ai-correction">
       <div class="ai-correction-head">
         ${badge}
-        ${sectionLabel ? `<span class="ai-correction-section">${escapeHtml(sectionLabel)}</span>` : ''}
+        ${sectionName ? `<span class="ai-correction-section">${escapeHtml(sectionName)}</span>` : ''}
         ${where}
       </div>
       <div class="ai-correction-line">
@@ -7822,9 +8047,15 @@ function correctionsBlock(result, interactive) {
   // still earns its place there — it is what has to be put right with the
   // candidate before they go further through the hiring process, and it is where
   // an automatic-fail condition from the rubric surfaces.
-  const intro = result.session_type === 'Conversion Call'
-    ? `What to put right with this candidate before they go any further. Same caveat as the rest of this card — listen to the moment before you act on it. This is a prompt for your judgement, not a verdict.`
-    : `What to go back over while you're still with them. Same caveat as the rest of this card — listen to the moment before you correct someone on it. This is a prompt for your judgement, not a verdict.`;
+  // A networking activity is neither: the meeting has ended, so there is nothing
+  // to "go back over" — but its follow-up has NOT, which is what separates it
+  // from a phone call. The promised introduction and the un-asked-for number are
+  // both still available, and naming that is the whole point of the list here.
+  const intro = result.session_type === 'Networking Activity'
+    ? `What is still worth doing about this contact — an introduction you didn't ask for can still be asked for, and one you promised can still be made. Same caveat as the rest of this card — listen to the moment before you act on it. This is a prompt for your judgement, not a verdict.`
+    : CALL_SESSION_TYPES.includes(result.session_type)
+      ? `What to put right with this candidate before they go any further. Same caveat as the rest of this card — listen to the moment before you act on it. This is a prompt for your judgement, not a verdict.`
+      : `What to go back over while you're still with them. Same caveat as the rest of this card — listen to the moment before you correct someone on it. This is a prompt for your judgement, not a verdict.`;
 
   return `<div class="ai-corrections">
     <span class="ai-callout-label">${escapeHtml(heading)}</span>
@@ -7981,7 +8212,7 @@ function renderAiGradingResult(result, container, audioFileId, transcriptLink) {
   let anyClips = false;
   let anyCorroborated = false;
   const sectionItems = Object.entries(result.sections || {}).map(([key, val]) => {
-    const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const label = sectionLabel(key);
     if (val.evidence_basis === 'inconsistent_across_runs') {
       anyInconsistent = true;
     } else if (val.evidence_basis === 'insufficient_evidence' || val.score == null) {
@@ -8913,7 +9144,20 @@ async function loadRecentLog() {
 // Same numbers as the "Training Evaluations" / "Site Visit Evaluations"
 // Smartsheets and Code.gs. If a rubric's pass mark ever changes, it changes in
 // all three places or this list stops matching the grade it's reporting.
-const SESSION_PASS_THRESHOLD = { 'Training Day': 85, 'Team On-Site Day': 38, 'Conversion Call': 48 };
+const SESSION_PASS_THRESHOLD = {
+  'Training Day': 85, 'Team On-Site Day': 38, 'Conversion Call': 48,
+  // 42 is 60% of 70 (the source rubrics pass at 6.0/10) AND exactly 7 sections
+  // at the section pass mark, so the bar can never contradict the every-section
+  // rule. Same property that makes 48/80 non-arbitrary on a Conversion Call.
+  'Reference Check': 42, 'Parent Reference Check': 42,
+  // 54 is the same pair of properties one size up: 60% of 90, and exactly 9
+  // sections at the section pass mark.
+  'Stage 2 Interview': 54,
+  // Back to 48, and for the same two reasons as the Conversion Call rather than
+  // by coincidence: 60% of 80, and exactly 8 sections at the section pass mark.
+  // Both rubrics happen to run to eight categories.
+  'Networking Activity': 48
+};
 const SECTION_PASS_MARK = 6;
 
 /* How many passing recordings it takes to certify somebody (Jordan, 2026-08-14).
@@ -9121,8 +9365,16 @@ function populateComparePickers() {
   if (!personSel || !typeSel) return;
 
   if (!typeSel.options.length) {
+    /* One option per SESSION TYPE, not per tab. A tab covering two of them
+       (Reference Checks) would otherwise put only its first variant on this
+       list, and the parent reference check — a separate rubric on a separate
+       scale — would be uncomparable, which is the one thing this tab exists
+       to do. Non-variant tabs keep their own label, which is the same string. */
     typeSel.innerHTML = LIVE_SESSION_TABS
-      .map(t => `<option value="${escapeHtml(t.sessionType)}">${escapeHtml(t.label)}</option>`).join('');
+      .reduce((opts, t) => opts.concat(
+        (t.variants || [t.sessionType]).map(v => ({ value: v, label: t.variants ? v : t.label }))
+      ), [])
+      .map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
   }
 
   // Preserved across a re-read, like every other picker in this file — a
@@ -9580,17 +9832,52 @@ async function loadCompare() {
    the form previews both before Submit (renderCertPreview).
 
    Conversion Call was added on 2026-08-14 on Jordan's ask — "if they got a
-   passing grade they are now certified, only for manual entries". That reverses
-   the note at RECRUITING_CERT_COLUMNS saying the five recruiting columns are
-   human-ticked only, FOR THIS ONE TYPE: the other four still have no rubric
-   loaded, so there is no score there to certify off. The safety property is
-   unchanged and is the reason this is allowed at all — only a manual grade a
-   human signed off ever reaches here. An AI grade still never writes to the
-   Roster on any session type, and mustn't until Phase 5. */
+   passing grade they are now certified, only for manual entries" — and both
+   reference checks and Stage 2 Interview followed on 2026-08-15 as each rubric
+   went live, every one of them on Jordan's explicit answer rather than as a side
+   effect of loading a rubric. Stage 1 Interview is the only recruiting column
+   left out, and for the original reason: no rubric loaded means no score to
+   certify off. The safety property is unchanged and is the reason any of this is
+   allowed at all — only a manual grade a human signed off ever reaches here. An
+   AI grade still never writes to the Roster on any session type, and mustn't
+   until Phase 5. */
 const SESSION_CERT_COLUMN = {
   'Training Day': 'Certified - Training Days',
   'Team On-Site Day': 'Certified - Team On-Site Days',
-  'Conversion Call': 'Certified - Conversion Calls'
+  'Conversion Call': 'Certified - Conversion Calls',
+  /* Both reference checks joined on 2026-08-15, on Jordan's ask, when their
+     rubrics went live in Code.gs V19. The reasoning in the note above holds
+     unchanged: what makes this legal is that only a MANUAL grade a human signed
+     off ever reaches certifyOnRoster.
+
+     TWO COLUMNS, NOT ONE, and they were already sitting on the Roster waiting.
+     The candidate check and the parent check are two rubrics scoring two
+     different calls, so passing one says nothing about the other — collapsing
+     them would certify somebody for a call they never made.
+
+     Stage 1 Interview is still out, and the original reason still governs it:
+     no rubric loaded means no score to certify off. That badge stays a
+     manager's tick. */
+  'Reference Check': 'Certified - Reference Checks',
+  'Parent Reference Check': 'Certified - Parent Reference Checks',
+  /* Stage 2 Interview joined on 2026-08-15 when its rubric went live in Code.gs
+     V20. Jordan was asked explicitly and chose to certify at 54+ rather than
+     leave it a hand-tick, so every recruiting type with a loaded rubric now
+     behaves the same way. The safety property is untouched and is the only
+     reason any of this is allowed: certifyOnRoster is reached ONLY from
+     manualGradePasses, which reads a number a human typed and a box a human
+     ticked. An AI grade still writes nothing to the Roster on any session type.
+
+     ONE PASS, not three — no SESSION_PASSES_REQUIRED entry, because an interview
+     is one sitting. A Team On-Site Day needs three because it is three or four
+     separate site visits; nothing like that applies here.
+
+     Worth knowing when reading a Stage 2 certification: the 54 bar is the
+     FLATTENED rubric, and its every-section-6 half is stricter than the source
+     document, which leaves three of the nine categories non-critical (one at a
+     5% weight). So this column can withhold a certification the weighted rubric
+     would have granted. See docs/stage-two-interview-rubric.md, difference 2. */
+  'Stage 2 Interview': 'Certified - Stage 2 Interviews'
 };
 
 /* Which roster board carries this session type's certification badge.
@@ -9647,10 +9934,42 @@ function isAlreadyCertified(name, sessionType) {
   return !!person && (person[col] || '').trim().toLowerCase() === 'yes';
 }
 
-// Same label transform the result card uses, so a section is named identically
-// whether you read it here or inside the expanded card.
+/* Prefixes that exist only to keep section keys unique and must never reach the
+   screen. Code.gs keeps ONE flat SECTION_LABELS map across every session type,
+   so two rubrics that share a category name need distinct keys — the parent
+   reference check and the candidate one both have a "Quality of Reference
+   Questions" category, at different numbers.
+
+   That namespacing is a storage concern, not a display one. Left in, every
+   section on a Parent Reference Check card reads "Parent Accurate Role
+   Explanation", "Parent Communication Tone" — the word repeated down a card
+   that is entirely about a parent call. Caught by rendering one.
+
+   EVERY namespaced rubric needs an entry here, and the ones added on 2026-08-15
+   were missed until a card was rendered: Stage 2's nine keys all begin stage2_
+   and the Networking Activity's eight all begin networking_, so those cards read
+   "Stage2 Leadership Assessment" and "Networking Building The List" — the same
+   defect as the parent one, one session type along, and on a card where the word
+   is repeated down all nine rows. When a rubric is added to Code.gs, check
+   whether its keys carry a prefix and add it here in the same change. */
+const SECTION_KEY_PREFIXES = ['parent_', 'stage2_', 'networking_'];
+
+/* The ONE label transform. It used to be copy-pasted at three call sites, which
+   is how the corrections list and the section it points at start disagreeing
+   about what that section is called.
+
+   The company name is forced back to capitals at the end. Title-casing a key is
+   the right default for every other word in a section name, and it is wrong for
+   exactly one: networking_deco_referral_identification would otherwise render as
+   "Deco Referral Identification" on the card, in the Compare table, in the
+   corrections list and in the Follow-Ups reasons — the four places it appears —
+   and DECO is written in capitals everywhere else in this app. */
 function sectionLabel(key) {
-  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  let k = String(key || '');
+  SECTION_KEY_PREFIXES.forEach(p => { if (k.indexOf(p) === 0) k = k.slice(p.length); });
+  return k.replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+    .replace(/\bDeco\b/g, 'DECO');
 }
 
 // Why this session is on the list — the actionable half of the tab. Kept to the
