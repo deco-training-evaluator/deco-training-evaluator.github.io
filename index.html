@@ -2426,11 +2426,10 @@
         they're left off — everyone else on the Roster is here, including any role added later.
         <br><strong>Changing a status:</strong> click any badge to change it — it writes straight back to the
         Roster sheet, and asks you to click again to confirm.
-        <br><strong>Four of these certify from a grade; Stage 1 Interview is ticked by hand.</strong>
+        <br><strong>All five of these certify from a grade.</strong>
         Submitting a <em>manual</em> grade with every section at 6 or higher ticks the matching column here for
-        you &mdash; 48/80 or better on a Conversion Call, 42/70 or better on either reference check, 54/90 or
-        better on a Stage 2 Interview. The Stage 1 Interview rubric isn't loaded yet, so there's no score to
-        certify off &mdash; that badge is a person's decision and nothing else.
+        you &mdash; 48/80 or better on a Conversion Call, 42/70 or better on either reference check, and 54/90
+        or better on either interview.
         <br><strong>The two reference checks are counted separately</strong>, because they're two different
         rubrics for two different calls. Passing the candidate one doesn't certify the parent one.
         <br><strong>Networking Activities are graded but have no column here</strong>, so a passing grade on one
@@ -2714,9 +2713,10 @@ const SESSION_TABS = [
   },
   {
     // Live since 2026-08-14 (Code.gs V18). Jordan produced the rubric and asked
-    // for it wired up, which reverses the 2026-08-13 note that the recruiting
-    // tabs stay preview until after the hackathon — that note stands for the
-    // other three, which still have no rubric loaded.
+    // for it wired up, which reversed the 2026-08-13 note that the recruiting
+    // tabs stay preview until after the hackathon. That note is now spent
+    // entirely — the other three followed over 2026-08-15 (V19–V22) and there
+    // are no preview tabs left in this app.
     //
     // This is the first live type that grades a RECRUITING call rather than a
     // field-training session, which is why it has no entry in
@@ -2734,12 +2734,20 @@ const SESSION_TABS = [
     status: 'live'
   },
   {
+    // Live since 2026-08-15 (Code.gs V22) — the LAST tab to go live, so every
+    // session type in the app now grades. 9 categories out of 90, pass at 54.
+    //
+    // No SESSION_PREREQUISITES entry, same as every recruiting type: the Day 1
+    // and Day 2 training steps have no bearing on running an interview, so that
+    // gate is inert here by construction rather than by special case.
+    //
+    // It DOES certify from a passing manual grade (Jordan's ask, 2026-08-15 —
+    // see SESSION_CERT_COLUMN), writing to the Recruiting Dashboard. The AI's
+    // own verdict still reads Pass / Fail and still writes nothing.
     key: 'stage1',
     label: 'Stage 1 Interview',
     sessionType: 'Stage 1 Interview',
-    status: 'preview',
-    phase: 'Phase 3 · More session types',
-    blurb: 'Score a recorded first-stage interview, section by section, with the same evidence timestamps the Training Day grader produces today.'
+    status: 'live'
   },
   {
     // Two kinds of reference check, one tab. Jordan's call (2026-08-13): the
@@ -3666,7 +3674,10 @@ const SESSION_SUBJECT_LABEL = {
   // run, and the other person at the table is a PARTICIPANT who has applied for
   // nothing. Picking them here would file the grade against somebody who is not
   // on DECO's roster and was not being graded.
-  'Networking Activity': 'Facilitator being graded'
+  'Networking Activity': 'Facilitator being graded',
+  // Same as Stage 2 — the DECO manager running the interview, never the
+  // candidate being interviewed.
+  'Stage 1 Interview': 'Interviewer being graded'
 };
 
 // Point the shared form at a session type: the manual grade is on the rubric's
@@ -3899,17 +3910,20 @@ const ROSTER_SHORT_LABELS = {
      parent reference check are two different session types with two different
      rubrics — the same reason they need two sessionType strings in Code.gs,
      even though they share one tab.
-   - **Four of these five certify from a grade; Stage 1 Interview is HUMAN-ticked
-     only.** SESSION_CERT_COLUMN is what lets a passing manual grade write a
-     certification onto the Roster and what raises the un-certify offer after a
-     delete. Conversion Calls joined it on 2026-08-14 (Jordan: "if they got a
-     passing grade they are now certified, only for manual entries") — the
-     decision this note said should be made deliberately rather than fall out of
-     adding a column — and both reference checks and Stage 2 joined on
-     2026-08-15 as their rubrics went live, each on Jordan's explicit answer to
-     that same question. Stage 1 stays out for the reason that governed all of
-     them: no rubric loaded means no score to certify off, so that badge is a
-     manager's tick and nothing else. A Networking Activity is graded and has no
+   - **ALL FIVE now certify from a grade.** SESSION_CERT_COLUMN is what lets a
+     passing manual grade write a certification onto the Roster and what raises
+     the un-certify offer after a delete. Conversion Calls joined it on
+     2026-08-14 (Jordan: "if they got a passing grade they are now certified,
+     only for manual entries") — the decision this note said should be made
+     deliberately rather than fall out of adding a column — then both reference
+     checks and Stage 2 on 2026-08-15 as their rubrics went live, and Stage 1
+     with V22 the same day, each on Jordan's explicit answer to that same
+     question. The "no rubric loaded means no score to certify off" reason that
+     governed the hold-outs is now fully spent; what has NOT changed is the
+     safety property, which is the only thing making any of this legal — only a
+     MANUAL grade a human signed off ever reaches certifyOnRoster, and an AI
+     grade still writes nothing to the Roster on any session type. A Networking
+     Activity is graded and has no
      column here at all — also Jordan's call — so it can certify nobody.
    - **Who appears is decided by EXCLUDING field managers, not by listing the
      senior roles.** An include-list would silently drop a role nobody has
@@ -3952,8 +3966,12 @@ const RECRUITING_SESSION_TYPES = [
    JSON field order and the transcription speaker labels on that side.
 
    Kept separate from RECRUITING_SESSION_TYPES above, which is about which BOARD
-   a session belongs on: a Stage 1 Interview is a recruiting session with nowhere
-   to be graded, and the two lists answer different questions. */
+   a session belongs on. The two lists answer different questions and still need
+   to: this one is only the recruiting types graded as PHONE CALLS, while the
+   board list also holds the two interviews and the networking activity. (Until
+   V22 the example here was "a Stage 1 Interview is a recruiting session with
+   nowhere to be graded" — that is no longer true of anything, since every
+   session type in the app now grades.) */
 const CALL_SESSION_TYPES = ['Conversion Call', 'Reference Check', 'Parent Reference Check'];
 
 const NON_RECRUITING_ROLE_KEYWORDS = ['field manager'];
@@ -7471,7 +7489,10 @@ const SESSION_MAX_POSSIBLE = {
   'Stage 2 Interview': 90,
   // Networking Activity is 8 categories out of 10 (Code.gs V21) — same 80 as the
   // Conversion Call, and the same 48 pass mark, because both run to 8 categories.
-  'Networking Activity': 80
+  'Networking Activity': 80,
+  // Stage 1 Interview is 9 categories out of 10 (Code.gs V22) — same 90 and the
+  // same 54 pass mark as Stage 2, because both interview rubrics run to 9.
+  'Stage 1 Interview': 90
 };
 
 /* ---------------------- Evidence timestamps ----------------------
@@ -7887,7 +7908,12 @@ const VERDICT_WORDS = {
   // Networking Activity (Code.gs V21). The only live recruiting type with NO
   // certification column at all — Jordan chose live grading without one — so
   // "Certified" here would name a badge that does not exist anywhere in the app.
-  'Networking Activity': { yes: 'Pass', no: 'Fail', noun: 'A pass', failPhrase: 'a fail' }
+  'Networking Activity': { yes: 'Pass', no: 'Fail', noun: 'A pass', failPhrase: 'a fail' },
+  // Stage 1 Interview (Code.gs V22). Certifies from a passing MANUAL grade, so
+  // the same rule as the other five: the AI's card says Pass / Fail because
+  // "Certified" over an AI score would claim authority only a human's sign-off
+  // carries.
+  'Stage 1 Interview': { yes: 'Pass', no: 'Fail', noun: 'A pass', failPhrase: 'a fail' }
 };
 const VERDICT_WORDS_DEFAULT = {
   yes: 'Certified', no: 'Not certified', noun: 'Certified', failPhrase: 'not certified'
@@ -9835,9 +9861,11 @@ async function loadCompare() {
    passing grade they are now certified, only for manual entries" — and both
    reference checks and Stage 2 Interview followed on 2026-08-15 as each rubric
    went live, every one of them on Jordan's explicit answer rather than as a side
-   effect of loading a rubric. Stage 1 Interview is the only recruiting column
-   left out, and for the original reason: no rubric loaded means no score to
-   certify off. The safety property is unchanged and is the reason any of this is
+   effect of loading a rubric. Stage 1 Interview completed the set with V22 on
+   the same day, the same way. So EVERY recruiting certification column now
+   certifies from a grade, and the "no rubric loaded means no score to certify
+   off" reason that used to govern the hold-outs no longer applies to anything.
+   The safety property is unchanged and is the reason any of this is
    allowed at all — only a manual grade a human signed off ever reaches here. An
    AI grade still never writes to the Roster on any session type, and mustn't
    until Phase 5. */
@@ -9855,9 +9883,9 @@ const SESSION_CERT_COLUMN = {
      different calls, so passing one says nothing about the other — collapsing
      them would certify somebody for a call they never made.
 
-     Stage 1 Interview is still out, and the original reason still governs it:
-     no rubric loaded means no score to certify off. That badge stays a
-     manager's tick. */
+     (This note used to end "Stage 1 Interview is still out, no rubric loaded
+     means no score to certify off" — Stage 1 joined in V22, see its own entry
+     below.) */
   'Reference Check': 'Certified - Reference Checks',
   'Parent Reference Check': 'Certified - Parent Reference Checks',
   /* Stage 2 Interview joined on 2026-08-15 when its rubric went live in Code.gs
@@ -9877,7 +9905,21 @@ const SESSION_CERT_COLUMN = {
      document, which leaves three of the nine categories non-critical (one at a
      5% weight). So this column can withhold a certification the weighted rubric
      would have granted. See docs/stage-two-interview-rubric.md, difference 2. */
-  'Stage 2 Interview': 'Certified - Stage 2 Interviews'
+  'Stage 2 Interview': 'Certified - Stage 2 Interviews',
+  /* Stage 1 Interview joined on 2026-08-15 when its rubric went live in Code.gs
+     V22 — asked deliberately rather than allowed to fall out of the column
+     already existing, the same way it was asked for every other type. 54+/90
+     AND the every-category tick, from a MANUAL grade only.
+
+     With this entry the "no rubric loaded means no score to certify off" reason
+     that kept the recruiting columns hand-ticked is fully spent: all five
+     recruiting certification columns now certify from a grade. The safety
+     property is the only thing holding, and it holds unchanged — certifyOnRoster
+     is reached ONLY from manualGradePasses, which reads a number a human typed
+     and a box a human ticked. An AI grade still writes nothing to the Roster on
+     any session type. A Networking Activity remains the one live recruiting type
+     with no column at all, by Jordan's choice. */
+  'Stage 1 Interview': 'Certified - Stage 1 Interviews'
 };
 
 /* Which roster board carries this session type's certification badge.
@@ -9951,8 +9993,13 @@ function isAlreadyCertified(name, sessionType) {
    "Stage2 Leadership Assessment" and "Networking Building The List" — the same
    defect as the parent one, one session type along, and on a card where the word
    is repeated down all nine rows. When a rubric is added to Code.gs, check
-   whether its keys carry a prefix and add it here in the same change. */
-const SECTION_KEY_PREFIXES = ['parent_', 'stage2_', 'networking_'];
+   whether its keys carry a prefix and add it here in the same change.
+   V22: stage1_ added WITH the rubric rather than after it — Stage 1 shares two
+   category names with Stage 2 (behavioural probing, motivation/fit) so its keys
+   had to be namespaced, and this is the entry that keeps "Stage1 Attainment
+   Assessment" off the card. Third time this prefix pairing has been needed;
+   treat it as part of loading a rubric, not as a follow-up. */
+const SECTION_KEY_PREFIXES = ['parent_', 'stage2_', 'networking_', 'stage1_'];
 
 /* The ONE label transform. It used to be copy-pasted at three call sites, which
    is how the corrections list and the section it points at start disagreeing
